@@ -2,10 +2,11 @@
 Testes do core do framework: ScrapedRecord, registry e exportação multi-formato.
 """
 import sqlite3
+from contextlib import closing
 import pandas as pd
 import pytest
 from compsognathus.core.record import ScrapedRecord
-from compsognathus.core.registry import _REGISTRY, get_parser, list_plugins, register
+from compsognathus.core.registry import _REGISTRY, get_parser, get_schema, list_plugins, register
 from compsognathus.scraper import export_dataframe
 
 
@@ -83,6 +84,33 @@ class TestRegistry:
         fn2 = get_parser("https://semwww-test.com.br/item")
         assert fn1 is fn2 is _parse_sw
 
+    def test_get_parser_aceita_subdominio_legitimo(self):
+        @register("dominio-seguro.com.br", schema=["x"])
+        def _parse_subdomain(html, url):
+            return ScrapedRecord(url=url, site="seguro")
+
+        fn = get_parser("https://anuncios.dominio-seguro.com.br/item")
+        assert fn is _parse_subdomain
+
+    def test_get_schema_retorna_campos_de_qualidade(self):
+        @register("schema-test.com", schema=["titulo", "preco"])
+        def _parse_schema(html, url):
+            return ScrapedRecord(url=url, site="schema")
+
+        assert get_schema("https://schema-test.com/item") == ["titulo", "preco"]
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://evilzapimoveis.com.br/item",
+            "https://zapimoveis.com.br.evil.test/item",
+            "nao-e-uma-url",
+        ],
+    )
+    def test_get_parser_rejeita_dominio_impostor_ou_url_invalida(self, url):
+        with pytest.raises(ValueError):
+            get_parser(url)
+
     def test_get_parser_levanta_erro_para_dominio_desconhecido(self):
         with pytest.raises(ValueError, match="Nenhum plugin"):
             get_parser("https://www.dominio-nao-existe-xyz.com/pagina")
@@ -127,7 +155,7 @@ class TestExportDataFrame:
         export_dataframe(sample_df, out_db, fmt="sqlite")
         assert out_db.exists()
 
-        with sqlite3.connect(out_db) as conn:
+        with closing(sqlite3.connect(out_db)) as conn:
             db_df = pd.read_sql_query("SELECT * FROM scraped_data", conn)
             assert len(db_df) == 2
             assert db_df.iloc[1]["titulo"] == "Item B"

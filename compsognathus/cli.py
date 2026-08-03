@@ -10,8 +10,12 @@ Comandos disponíveis:
 from __future__ import annotations
 
 import logging
+import re
+from contextlib import closing
+from html import escape
 from pathlib import Path
 from typing import Optional
+from urllib.parse import urlparse
 
 import typer
 from rich.console import Console
@@ -34,36 +38,47 @@ console = Console()
 def _setup_logging(verbose: bool = False) -> None:
     """Configura logging: console colorido (via rich) + arquivo compsognathus.log."""
     level = logging.DEBUG if verbose else logging.INFO
+    file_handler = logging.FileHandler("compsognathus.log", encoding="utf-8", delay=True)
     logging.basicConfig(
         level=level,
         format="%(message)s",
         handlers=[
             RichHandler(console=console, show_path=False, markup=True),
-            logging.FileHandler("compsognathus.log", encoding="utf-8"),
+            file_handler,
         ],
+        force=True,
     )
 
 
 def _read_urls(source: str) -> list[str]:
     """Lê URLs de um arquivo .txt ou de uma string de URL única."""
-    if source.startswith("http://") or source.startswith("https://"):
-        return [source.strip().strip('"\'')]
+    source_clean = source.strip().strip('"\'')
+    if urlparse(source_clean).scheme:
+        urls = [source_clean]
+    else:
+        path = Path(source_clean)
+        if not path.exists():
+            console.print(f"[red]❌ Arquivo não encontrado: {source}[/red]")
+            raise typer.Exit(1)
 
-    path = Path(source)
-    if not path.exists():
-        console.print(f"[red]❌ Arquivo não encontrado: {source}[/red]")
-        raise typer.Exit(1)
-
-    raw_lines = path.read_text(encoding="utf-8").splitlines()
-    urls = []
-    for line in raw_lines:
-        clean = line.strip().strip('"\'')
-        # Ignora linhas vazias e comentários iniciados por '#' ou '//'
-        if clean and not clean.startswith("#") and not clean.startswith("//"):
-            urls.append(clean)
+        raw_lines = path.read_text(encoding="utf-8").splitlines()
+        urls = []
+        for line in raw_lines:
+            clean = line.strip().strip('"\'')
+            # Ignora linhas vazias e comentários iniciados por '#' ou '//'
+            if clean and not clean.startswith("#") and not clean.startswith("//"):
+                urls.append(clean)
 
     if not urls:
         console.print("[red]❌ Nenhuma URL válida encontrada no arquivo.[/red]")
+        raise typer.Exit(1)
+
+    invalid = [
+        url for url in urls
+        if urlparse(url).scheme not in ("http", "https") or not urlparse(url).netloc
+    ]
+    if invalid:
+        console.print(f"[red]❌ URL(s) inválida(s): {', '.join(invalid[:3])}[/red]")
         raise typer.Exit(1)
 
     return urls
@@ -76,7 +91,7 @@ def scrape(
     source: str = typer.Argument(..., help="Arquivo .txt com URLs ou uma URL direta."),
     output: Path = typer.Option(Path("output.parquet"), "--output", "-o", help="Arquivo de saída (parquet, csv, json, jsonl, sqlite)."),
     fmt: str = typer.Option("parquet", "--format", "-f", help="Formato: 'parquet', 'csv', 'json', 'jsonl', 'sqlite'."),
-    concurrency: int = typer.Option(1, "--concurrency", "-c", help="Número de downloads simultâneos em paralelo."),
+    concurrency: int = typer.Option(1, "--concurrency", "-c", min=1, help="Número de downloads simultâneos em paralelo."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Exibe logs detalhados."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Valida URLs e plugins disponíveis sem realizar downloads."),
 ) -> None:
@@ -96,6 +111,22 @@ def scrape(
     import compsognathus.plugins  # noqa: F401
 
     urls = _read_urls(source)
+
+    known_suffixes = {
+        ".parquet": "parquet",
+        ".pq": "parquet",
+        ".csv": "csv",
+        ".json": "json",
+        ".jsonl": "jsonl",
+        ".ndjson": "jsonl",
+        ".db": "sqlite",
+        ".sqlite": "sqlite",
+        ".sqlite3": "sqlite",
+    }
+    suffix_format = known_suffixes.get(output.suffix.lower())
+    if fmt.lower() == "parquet" and suffix_format and suffix_format != "parquet":
+        fmt = suffix_format
+        console.print(f"[dim]Formato inferido pela extensão: {fmt}[/dim]")
 
     if dry_run:
         console.print(f"\n[bold yellow]🔍 DRY RUN — Validação de URLs ({len(urls)} URLs)[/bold yellow]\n")
@@ -189,7 +220,7 @@ def report(
         elif file.suffix in (".json", ".jsonl"):
             df = pd.read_json(file, lines=file.suffix == ".jsonl")
         elif file.suffix in (".db", ".sqlite", ".sqlite3"):
-            with sqlite3.connect(file) as conn:
+            with closing(sqlite3.connect(file)) as conn:
                 df = pd.read_sql_query("SELECT * FROM scraped_data", conn)
         else:
             # Tenta parquet primeiro por padrão
@@ -274,9 +305,23 @@ def plugins_new(
     Exemplo:
         comps plugins new olx.com.br
     """
-    clean_domain = domain.lower().replace("https://", "").replace("http://", "").strip("/")
+    from urllib.parse import urlparse
+
+    raw_domain = domain.strip()
+    parsed = urlparse(raw_domain if "://" in raw_domain else f"//{raw_domain}")
+    clean_domain = (parsed.hostname or "").lower().rstrip(".")
     if clean_domain.startswith("www."):
         clean_domain = clean_domain[4:]
+
+    has_extra_url_parts = bool(parsed.path and parsed.path != "/") or bool(parsed.query or parsed.fragment)
+    valid_labels = clean_domain.split(".")
+    is_valid_domain = (
+        len(valid_labels) >= 2
+        and all(re.fullmatch(r"[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?", label) for label in valid_labels)
+    )
+    if has_extra_url_parts or not is_valid_domain:
+        console.print(f"[red]❌ Domínio inválido: {domain}[/red]")
+        raise typer.Exit(1)
 
     # Nome do módulo python: olx.com.br -> olx
     mod_name = clean_domain.split(".")[0].replace("-", "_")
@@ -360,11 +405,34 @@ def parse(html: str, url: str) -> ScrapedRecord:
     fixture_file.parent.mkdir(parents=True, exist_ok=True)
     fixture_file.write_text(fixture_code, encoding="utf-8")
 
+    init_file = Path("compsognathus") / "plugins" / "__init__.py"
+    import_line = f"import compsognathus.plugins.{mod_name}  # noqa: F401"
+    init_text = init_file.read_text(encoding="utf-8") if init_file.exists() else ""
+    if import_line not in init_text:
+        init_file.parent.mkdir(parents=True, exist_ok=True)
+        init_file.write_text(init_text.rstrip() + "\n" + import_line + "\n", encoding="utf-8")
+
+    test_file = Path("tests") / f"test_{mod_name}.py"
+    test_code = f'''from pathlib import Path
+
+from compsognathus.plugins.{mod_name} import parse
+
+
+def test_{mod_name}_fixture():
+    fixture = Path(__file__).parent / "fixtures" / "{mod_name}_sample.html"
+    html = fixture.read_text(encoding="utf-8")
+    record = parse(html, "https://{clean_domain}/item/1")
+    assert record.fields["titulo"]
+'''
+    if not test_file.exists():
+        test_file.parent.mkdir(parents=True, exist_ok=True)
+        test_file.write_text(test_code, encoding="utf-8")
+
     console.print(f"\n[bold green]✨ Scaffold criado com sucesso para '{clean_domain}'![/bold green]\n")
     console.print(f"  📄 Plugin criado: [cyan]{plugin_file}[/cyan]")
     console.print(f"  🧪 Fixture criada: [cyan]{fixture_file}[/cyan]\n")
-    console.print("[bold yellow]Próximo passo:[/bold yellow] Adicione esta linha em [cyan]compsognathus/plugins/__init__.py[/cyan]:")
-    console.print(f"  [bold white]import compsognathus.plugins.{mod_name}[/bold white]\n")
+    console.print(f"  🧩 Import registrado em: [cyan]{init_file}[/cyan]")
+    console.print(f"  🧪 Teste criado: [cyan]{test_file}[/cyan]\n")
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -396,21 +464,24 @@ def _export_html_report(df, filename: str, output_path: Path) -> None:
     ok_count = int(df["parse_ok"].sum()) if "parse_ok" in df.columns else total
     taxa_ok = (ok_count / total * 100) if total > 0 else 0
 
-    table_rows_html = ""
+    table_rows: list[str] = []
     for _, row in df.head(20).iterrows():
-        table_rows_html += "<tr>"
+        cells: list[str] = []
         for col in df.columns[:8]:
-            val = str(row[col]) if hasattr(row, col) and row[col] is not None else "-"
-            table_rows_html += f"<td>{val[:40]}</td>"
-        table_rows_html += "</tr>"
+            value = row[col]
+            val = "-" if value is None else str(value)
+            cells.append(f"<td>{escape(val[:40])}</td>")
+        table_rows.append(f"<tr>{''.join(cells)}</tr>")
+    table_rows_html = "".join(table_rows)
 
-    headers_html = "".join(f"<th>{col}</th>" for col in df.columns[:8])
+    headers_html = "".join(f"<th>{escape(str(col))}</th>" for col in df.columns[:8])
+    safe_filename = escape(filename)
 
     html_content = f"""<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Relatório Compsognathus - {filename}</title>
+    <title>Relatório Compsognathus - {safe_filename}</title>
     <style>
         body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; margin: 0; padding: 2rem; }}
         .card {{ background: #1e293b; border-radius: 12px; padding: 1.5rem; margin-bottom: 1.5rem; border: 1px solid #334155; }}
@@ -427,7 +498,7 @@ def _export_html_report(df, filename: str, output_path: Path) -> None:
 <body>
     <div class="card">
         <h1>🦕 Compsognathus — Relatório do Dataset</h1>
-        <p style="color: #94a3b8">Arquivo analisado: <strong>{filename}</strong></p>
+        <p style="color: #94a3b8">Arquivo analisado: <strong>{safe_filename}</strong></p>
         <div class="grid">
             <div class="metric"><div>Total de Registros</div><div class="val">{total}</div></div>
             <div class="metric"><div>Taxa de Sucesso</div><div class="val">{taxa_ok:.1f}%</div></div>

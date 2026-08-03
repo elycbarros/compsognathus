@@ -65,15 +65,19 @@ def _url_to_filename(url: str) -> str:
 
 def _is_valid_html(html: str) -> bool:
     """Valida se o HTML recebido contém conteúdo real (não é erro de WAF)."""
-    if not html or len(html) < 8_000:
+    if not html or len(html.strip()) < 512:
         return False
 
     header_sample = html[:3_000].lower()
+    if "<html" not in header_sample and "<!doctype html" not in header_sample:
+        return False
+
     block_markers = [
         "access denied",
         "403 forbidden",
         "enable javascript and cookies to continue",
         "just a moment...",
+        "cf-chl-",
     ]
     if any(marker in header_sample for marker in block_markers):
         return False
@@ -85,7 +89,7 @@ def _is_valid_html(html: str) -> bool:
 
 @retry(
     retry=retry_if_exception_type(Exception),
-    stop=stop_after_attempt(1),
+    stop=stop_after_attempt(2),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
@@ -173,6 +177,8 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
     """Baixa uma URL, salva o HTML no disco e retorna o resultado."""
     output_dir.mkdir(parents=True, exist_ok=True)
     filepath = output_dir / _url_to_filename(url)
+    pw_error: Exception | None = None
+    httpx_error: Exception | None = None
 
     try:
         html = _try_playwright(url)
@@ -180,8 +186,9 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
         size = len(html)
         logger.info("✅ playwright  %s (%d KB)", url, size // 1024)
         return DownloadResult(url=url, filepath=filepath, method="playwright", ok=True, size_bytes=size)
-    except Exception as pw_err:
-        logger.warning("Playwright falhou: %s — %s", url, pw_err)
+    except Exception as exc:
+        pw_error = exc
+        logger.warning("Playwright falhou: %s — %s", url, exc)
 
     try:
         html = _try_httpx(url)
@@ -189,10 +196,15 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
         size = len(html)
         logger.info("⚠️  httpx       %s (%d KB)", url, size // 1024)
         return DownloadResult(url=url, filepath=filepath, method="httpx", ok=True, size_bytes=size)
-    except Exception as httpx_err:
-        logger.error("httpx falhou: %s — %s", url, httpx_err)
+    except Exception as exc:
+        httpx_error = exc
+        logger.error("httpx falhou: %s — %s", url, exc)
 
-    err_msg = f"Falha no download: HTML inválido ou bloqueado pelo WAF em {url}"
+    err_msg = (
+        f"Falha no download em {url}: "
+        f"Playwright={type(pw_error).__name__}: {pw_error}; "
+        f"httpx={type(httpx_error).__name__}: {httpx_error}"
+    )
     logger.error("❌ %s", err_msg)
     return DownloadResult(url=url, filepath=None, method="error", ok=False, error=err_msg)
 
@@ -211,6 +223,9 @@ def download_all(
         concurrency:       Número de threads simultâneas para download (default=1).
         progress_callback: Função chamada após cada download (atual, total, resultado).
     """
+    if concurrency < 1:
+        raise ValueError("concurrency deve ser maior ou igual a 1")
+
     total = len(urls)
     logger.info("Iniciando download de %d URL(s) → %s (threads=%d)", total, output_dir, concurrency)
 
@@ -227,7 +242,7 @@ def download_all(
         return results
 
     # Execução concorrente via ThreadPoolExecutor
-    results_map: dict[str, DownloadResult] = {}
+    results: list[DownloadResult | None] = [None] * total
     completed_count = 0
 
     def _worker(url_item: str) -> DownloadResult:
@@ -236,20 +251,23 @@ def download_all(
         return download_url(url_item, output_dir)
 
     with ThreadPoolExecutor(max_workers=concurrency) as executor:
-        future_to_url = {executor.submit(_worker, url): url for url in urls}
+        future_to_index = {
+            executor.submit(_worker, url): index for index, url in enumerate(urls)
+        }
 
-        for future in as_completed(future_to_url):
-            url = future_to_url[future]
+        for future in as_completed(future_to_index):
+            index = future_to_index[future]
+            url = urls[index]
             try:
                 res = future.result()
             except Exception as exc:
                 res = DownloadResult(url=url, filepath=None, method="error", ok=False, error=str(exc))
 
-            results_map[url] = res
+            results[index] = res
             completed_count += 1
 
             if progress_callback:
                 progress_callback(completed_count, total, res)
 
     # Garante a ordem original das URLs na lista final
-    return [results_map[url] for url in urls if url in results_map]
+    return [result for result in results if result is not None]

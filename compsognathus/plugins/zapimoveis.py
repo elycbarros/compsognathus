@@ -20,16 +20,29 @@ from compsognathus.core.registry import register
 
 def _clean_price(text: str) -> float | None:
     """Extrai valor numérico de string de preço ('R$ 450.000' → 450000.0)."""
-    digits = re.sub(r"[^\d]", "", text)
-    val = float(digits) if digits else None
+    match = re.search(r"\d[\d.]*(?:,\d{1,2})?(?![\d.,])", text)
+    if not match:
+        return None
+    number = match.group(0)
+    if "," in number:
+        number = number.replace(".", "").replace(",", ".")
+    elif number.count(".") and len(number.rsplit(".", 1)[1]) == 3:
+        number = number.replace(".", "")
+    val = float(number)
     return val if val and val >= 10_000 else None  # filtra valores fisicamente impossíveis
 
 
 def _clean_area(text: str) -> float | None:
     """Extrai área em m² de um texto ('80 m²' → 80.0)."""
-    text = text.replace(",", ".")
-    m = re.search(r"([\d]+(?:\.\d+)?)\s*m", text)
-    val = float(m.group(1)) if m else None
+    m = re.search(r"([\d.]+(?:,\d+)?)\s*m", text)
+    if not m:
+        return None
+    number = m.group(1)
+    if "," in number:
+        number = number.replace(".", "").replace(",", ".")
+    elif number.count(".") and len(number.rsplit(".", 1)[1]) == 3:
+        number = number.replace(".", "")
+    val = float(number)
     return val if val and 10.0 <= val <= 100_000.0 else None  # intervalo físico plausível
 
 
@@ -210,7 +223,7 @@ def parse(html: str, url: str) -> ScrapedRecord:
                 quartos = _clean_int(el.get_text())
                 if quartos is not None:
                     break
-    if quartos is None:
+    if quartos is None and not is_terreno:
         errors.append("quartos")
 
     suites = nd.get("suites")

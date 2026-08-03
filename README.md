@@ -12,7 +12,7 @@
 
 Compsognathus é um framework de scraping orientado a **plugins**. Você registra um plugin para um domínio (com ~20 linhas de Python) e a CLI cuida do resto: download com Playwright, retry automático, exportação em Parquet/CSV e relatório de qualidade.
 
-**Plugins bundled — 4 domínios/segmentos distintos:**
+**Plugins bundled — 5 plugins em 3 segmentos:**
 
 | Plugin | Site | Campos extraídos |
 |---|---|---|
@@ -107,7 +107,7 @@ comps report dados.parquet --html relatorio.html
 ```bash
 comps plugins new olx.com.br
 ```
-Este comando gera automaticamente o código inicial do plugin em `compsognathus/plugins/olx.py` e a fixture em `tests/fixtures/olx_sample.html`!
+Este comando gera automaticamente o código inicial do plugin, a fixture, o teste e o registro do import.
 
 ### Opção 2: Manual
 
@@ -138,7 +138,7 @@ comps plugins list
 
 ---
 
-## Adicionando um novo plugin
+## Exemplo de plugin
 
 Crie um novo parser em **20 linhas**. Veja o template comentado em [`plugins/example_generic.py`](compsognathus/plugins/example_generic.py) e o tutorial completo em [`docs/writing-a-plugin.md`](docs/writing-a-plugin.md).
 

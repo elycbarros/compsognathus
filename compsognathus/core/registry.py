@@ -24,6 +24,22 @@ from compsognathus.core.record import ScrapedRecord
 _REGISTRY: dict[str, tuple[Callable[[str, str], ScrapedRecord], list[str]]] = {}
 
 
+def _host_for_url(url: str) -> str:
+    """Extrai um hostname normalizado ou retorna vazio para URL inválida."""
+    host = (urlparse(url).hostname or "").lower().rstrip(".")
+    return host[4:] if host.startswith("www.") else host
+
+
+def _find_registration(url: str):
+    host = _host_for_url(url)
+    if not host:
+        return None
+    for domain, registration in _REGISTRY.items():
+        if host == domain or host.endswith(f".{domain}"):
+            return registration
+    return None
+
+
 def register(domain: str, schema: list[str] | None = None):
     """Decorator que registra uma função parse para um domínio.
 
@@ -37,9 +53,15 @@ def register(domain: str, schema: list[str] | None = None):
         def parse(html: str, url: str) -> ScrapedRecord:
             ...
     """
+    normalized_domain = domain.strip().lower().rstrip(".")
+    if normalized_domain.startswith("www."):
+        normalized_domain = normalized_domain[4:]
+    if not normalized_domain or any(char in normalized_domain for char in "/:@"):
+        raise ValueError(f"Domínio inválido para registro: {domain!r}")
+
     def decorator(fn: Callable[[str, str], ScrapedRecord]) -> Callable[[str, str], ScrapedRecord]:
         # PLUGIN HOOK: cada @register adiciona uma entrada ao dicionário global
-        _REGISTRY[domain] = (fn, schema or [])
+        _REGISTRY[normalized_domain] = (fn, schema or [])
         return fn
     return decorator
 
@@ -50,14 +72,14 @@ def get_parser(url: str) -> Callable[[str, str], ScrapedRecord]:
     Raises:
         ValueError: se nenhum plugin estiver registrado para esse domínio.
     """
-    host = urlparse(url).netloc.lower()
-    if host.startswith("www."):
-        host = host[4:]  # remove "www." para padronizar
+    host = _host_for_url(url)
+    if not host:
+        raise ValueError(f"URL inválida ou sem domínio: {url!r}")
 
-    # Busca por correspondência parcial: "zapimoveis.com.br" contém "zapimoveis"
-    for domain, (fn, _) in _REGISTRY.items():
-        if domain in host:
-            return fn
+    # Aceita o domínio exato e seus subdomínios, sem confundir domínios impostores.
+    registration = _find_registration(url)
+    if registration:
+        return registration[0]
 
     registered = list(_REGISTRY.keys())
     raise ValueError(
@@ -65,6 +87,14 @@ def get_parser(url: str) -> Callable[[str, str], ScrapedRecord]:
         f"Plugins disponíveis: {registered}\n"
         f"Para criar um novo plugin, veja: docs/writing-a-plugin.md"
     )
+
+
+def get_schema(url: str) -> list[str]:
+    """Retorna os campos de qualidade declarados pelo plugin da URL."""
+    registration = _find_registration(url)
+    if registration:
+        return list(registration[1])
+    raise ValueError(f"Nenhum plugin registrado para: {url!r}")
 
 
 def list_plugins() -> list[dict]:

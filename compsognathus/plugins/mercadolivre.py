@@ -11,12 +11,12 @@ Estratégia de extração:
     1. JSON-LD (Schema.org Product) — mais estruturado e estável
     2. Seletores CSS + meta tags — fallback para campos não cobertos pelo JSON-LD
 """
-import json
 import re
 from bs4 import BeautifulSoup
 
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
+from compsognathus.plugins._jsonld import iter_jsonld_items
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -39,35 +39,31 @@ def _extract_jsonld(soup: BeautifulSoup) -> dict:
     com dados estruturados. Esse é o método mais confiável de extração.
     """
     data: dict = {}
-    for script in soup.find_all("script", type="application/ld+json"):
+    for item in iter_jsonld_items(soup):
         try:
-            ld = json.loads(script.string or "")
-            # Normaliza: pode ser um objeto único ou uma lista
-            items = ld if isinstance(ld, list) else [ld]
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                # Procura pelo tipo Product (Schema.org)
-                if item.get("@type") not in ("Product", "Offer"):
-                    continue
-                data["produto"] = item.get("name")
-                data["descricao"] = str(item.get("description", ""))[:500] or None
-                data["url_imagem"] = item.get("image")
+            item_type = item.get("@type")
+            if item_type not in ("Product", "Offer") and not (
+                isinstance(item_type, list) and "Product" in item_type
+            ):
+                continue
+            data["produto"] = item.get("name")
+            data["descricao"] = str(item.get("description", ""))[:500] or None
+            data["url_imagem"] = item.get("image")
 
-                offers = item.get("offers") or {}
-                if isinstance(offers, list):
-                    offers = offers[0] if offers else {}
-                data["preco"] = float(offers.get("price", 0)) or None
-                data["condicao"] = offers.get("itemCondition", "").split("/")[-1] or None
+            offers = item.get("offers") or {}
+            if isinstance(offers, list):
+                offers = offers[0] if offers else {}
+            data["preco"] = float(offers.get("price", 0)) or None
+            data["condicao"] = offers.get("itemCondition", "").split("/")[-1] or None
 
-                agg = item.get("aggregateRating") or {}
-                if agg:
-                    data["avaliacao"] = float(agg.get("ratingValue", 0)) or None
-                    data["num_avaliacoes"] = int(agg.get("reviewCount", 0)) or None
+            agg = item.get("aggregateRating") or {}
+            if agg:
+                data["avaliacao"] = float(agg.get("ratingValue", 0)) or None
+                data["num_avaliacoes"] = int(agg.get("reviewCount", 0)) or None
 
-                if data.get("produto"):
-                    break  # achou o produto, sai do loop
-        except Exception:
+            if data.get("produto"):
+                break  # achou o produto, sai do loop
+        except (TypeError, ValueError, AttributeError):
             continue
     return data
 

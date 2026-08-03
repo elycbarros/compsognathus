@@ -68,6 +68,27 @@ class TestZapImoveisParser:
         rec = parse(html, self.URL)
         assert rec.site == "zapimoveis"
 
+    def test_normaliza_preco_com_centavos_e_area_com_milhar(self):
+        from compsognathus.plugins.zapimoveis import _clean_area, _clean_price
+
+        assert _clean_price("R$ 650.000,00") == 650_000.0
+        assert _clean_area("Área total 1.250 m²") == 1_250.0
+
+    def test_terreno_nao_exige_quartos(self):
+        from compsognathus.plugins.zapimoveis import parse
+
+        html = """
+        <html><head><title>Terreno à venda</title></head><body>
+          <p data-testid="listing-price">R$ 450.000,00</p>
+          <li data-testid="total-area">Área total 1.250 m²</li>
+          <address>Bairro Centro, Florianópolis, SC</address>
+        </body></html>
+        """
+        rec = parse(html, "https://www.zapimoveis.com.br/imovel/terreno-123")
+        assert rec.parse_ok is True
+        assert rec.fields["quartos"] is None
+        assert rec.fields["area_privativa"] == 1_250.0
+
 
 # ── VivaReal ──────────────────────────────────────────────────────────────────
 
@@ -97,6 +118,27 @@ class TestVivaRealParser:
         html = load_fixture("vivareal_sample.html")
         rec = parse(html, self.URL)
         assert rec.parse_ok is True
+
+    def test_normaliza_preco_com_centavos_e_area_com_milhar(self):
+        from compsognathus.plugins.vivareal import _clean_area, _clean_price
+
+        assert _clean_price("R$ 890.000,00") == 890_000.0
+        assert _clean_area("Área do terreno 2.500 m²") == 2_500.0
+
+    def test_terreno_nao_exige_quartos(self):
+        from compsognathus.plugins.vivareal import parse
+
+        html = """
+        <html><head><title>Lote à venda</title></head><body>
+          <p data-cy="listing-price">R$ 890.000,00</p>
+          <li data-cy="total-area">Área total 2.500 m²</li>
+          <address>Bairro Centro, Palhoça, SC</address>
+        </body></html>
+        """
+        rec = parse(html, "https://www.vivareal.com.br/imovel/lote-123")
+        assert rec.parse_ok is True
+        assert rec.fields["quartos"] is None
+        assert rec.fields["area_privativa"] == 2_500.0
 
 
 # ── Mercado Livre ─────────────────────────────────────────────────────────────
@@ -135,6 +177,22 @@ class TestMercadoLivreParser:
         rec = parse(html, self.URL)
         assert "produto" in rec.fields
         assert "quartos" not in rec.fields  # não é imóvel
+
+    def test_extrai_jsonld_dentro_de_graph(self):
+        from compsognathus.plugins.mercadolivre import parse
+
+        html = """
+        <script type="application/ld+json">
+        {"@context":"https://schema.org", "@graph":[
+          {"@type":"Product", "name":"Produto Graph",
+           "offers":{"price":"199.90"},
+           "aggregateRating":{"ratingValue":"4.5", "reviewCount":"10"}}
+        ]}
+        </script>
+        """
+        rec = parse(html, "https://www.mercadolivre.com.br/p/graph")
+        assert rec.fields["produto"] == "Produto Graph"
+        assert rec.fields["preco"] == 199.9
 
 
 # ── Catho (Vagas) ─────────────────────────────────────────────────────────────
@@ -180,6 +238,21 @@ class TestCathoParser:
         assert "cargo" in rec.fields
         assert "preco" not in rec.fields     # não é produto
         assert "quartos" not in rec.fields   # não é imóvel
+
+    def test_extrai_jobposting_dentro_de_graph(self):
+        from compsognathus.plugins.catho import parse
+
+        html = """
+        <script type="application/ld+json">
+        {"@graph":[{"@type":"JobPosting", "title":"Dev Graph",
+          "hiringOrganization":{"name":"Acme"},
+          "jobLocation":{"address":{"addressLocality":"Recife"}},
+          "baseSalary":{"value":{"value":5000}}}]}
+        </script>
+        """
+        rec = parse(html, "https://www.catho.com.br/vagas/graph")
+        assert rec.fields["cargo"] == "Dev Graph"
+        assert rec.fields["empresa"] == "Acme"
 
 
 # ── Books to Scrape (Livros / E-commerce Sandbox) ────────────────────────────

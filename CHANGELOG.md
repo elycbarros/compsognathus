@@ -5,6 +5,19 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+## [1.3.0] — 2026-08-03
+
+### Melhorado
+- **CLI mais segura**: valida URLs HTTP/HTTPS, infere o formato pela extensão do arquivo e rejeita concorrência inválida.
+- **Scaffolding completo**: `comps plugins new` cria o plugin, fixture, teste e registro automático do import.
+- **Pipeline auditável**: falhas de download/parsing e metadados de qualidade são preservados no resultado.
+- **Extração estruturada**: suporte compartilhado a JSON-LD com `@graph`.
+
+### Testes
+- Suíte ampliada para 68 testes, cobrindo falhas de rede, schema, CLI, JSON-LD e pipeline.
+
+---
+
 ## [1.2.0] — 2026-08-03
 
 ### Adicionado
@@ -13,6 +26,9 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Downloads Concorrentes (`--concurrency N` / `-c N`)**: Suporte a downloads simultâneos em paralelo via ThreadPoolExecutor para alta performance em grandes listas de URLs.
 - **Relatório HTML Visual (`comps report <arquivo> --html relatorio.html`)**: Exporte relatórios visuais responsivos em página única HTML com métricas e prévia dos dados.
 - **Relatórios de Cobertura no CI**: Configurado upload de artefatos XML de cobertura de código no GitHub Actions.
+- **Rastreabilidade do pipeline**: URLs com falha de download ou parsing permanecem no dataset final com erro e método de download.
+- **Qualidade centralizada**: campos declarados no schema do plugin são validados pelo orquestrador.
+- **Scaffolding completo**: `plugins new` também registra o import e cria um teste executável.
 
 ---
 
@@ -47,5 +63,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+[1.3.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.3.0
+[1.2.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.2.0
 [1.1.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.1.0
 [1.0.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.0.0

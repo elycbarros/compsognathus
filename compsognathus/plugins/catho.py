@@ -12,12 +12,12 @@ Estratégia de extração:
     2. Meta tags Open Graph — título e descrição
     3. Seletores CSS — fallback para campos específicos do Catho
 """
-import json
 import re
 from bs4 import BeautifulSoup
 
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
+from compsognathus.plugins._jsonld import iter_jsonld_items
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -41,48 +41,46 @@ def _extract_jsonld(soup: BeautifulSoup) -> dict:
     campos como title, hiringOrganization, baseSalary, jobLocation, etc.
     """
     data: dict = {}
-    for script in soup.find_all("script", type="application/ld+json"):
+    for item in iter_jsonld_items(soup):
         try:
-            ld = json.loads(script.string or "")
-            items = ld if isinstance(ld, list) else [ld]
-            for item in items:
-                if not isinstance(item, dict):
-                    continue
-                if item.get("@type") not in ("JobPosting", "Job"):
-                    continue
+            item_type = item.get("@type")
+            if item_type not in ("JobPosting", "Job") and not (
+                isinstance(item_type, list) and any(t in ("JobPosting", "Job") for t in item_type)
+            ):
+                continue
 
-                data["cargo"] = item.get("title")
+            data["cargo"] = item.get("title")
 
-                # Empresa contratante
-                org = item.get("hiringOrganization") or {}
-                if isinstance(org, dict):
-                    data["empresa"] = org.get("name")
+            # Empresa contratante
+            org = item.get("hiringOrganization") or {}
+            if isinstance(org, dict):
+                data["empresa"] = org.get("name")
 
-                # Localização
-                location = item.get("jobLocation") or {}
-                if isinstance(location, dict):
-                    addr = location.get("address") or {}
-                    if isinstance(addr, dict):
-                        data["cidade"] = addr.get("addressLocality")
-                        data["estado"] = addr.get("addressRegion")
+            # Localização
+            location = item.get("jobLocation") or {}
+            if isinstance(location, dict):
+                addr = location.get("address") or {}
+                if isinstance(addr, dict):
+                    data["cidade"] = addr.get("addressLocality")
+                    data["estado"] = addr.get("addressRegion")
 
-                # Salário (Schema.org MonetaryAmount)
-                salary = item.get("baseSalary") or {}
-                if isinstance(salary, dict):
-                    value = salary.get("value") or {}
-                    if isinstance(value, dict):
-                        data["salario"] = float(value.get("value", 0)) or None
-                    elif isinstance(value, (int, float)):
-                        data["salario"] = float(value)
+            # Salário (Schema.org MonetaryAmount)
+            salary = item.get("baseSalary") or {}
+            if isinstance(salary, dict):
+                value = salary.get("value") or {}
+                if isinstance(value, dict):
+                    data["salario"] = float(value.get("value", 0)) or None
+                elif isinstance(value, (int, float)):
+                    data["salario"] = float(value)
 
-                # Tipo de contrato e nível
-                data["regime"] = item.get("employmentType")
-                data["descricao"] = str(item.get("description", ""))[:1000] or None
-                data["data_publicacao"] = item.get("datePosted")
+            # Tipo de contrato e nível
+            data["regime"] = item.get("employmentType")
+            data["descricao"] = str(item.get("description", ""))[:1000] or None
+            data["data_publicacao"] = item.get("datePosted")
 
-                if data.get("cargo"):
-                    break
-        except Exception:
+            if data.get("cargo"):
+                break
+        except (TypeError, ValueError, AttributeError):
             continue
     return data
 

@@ -12,13 +12,15 @@ from __future__ import annotations
 
 import logging
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 import pandas as pd
 
 from compsognathus.core.record import ScrapedRecord
-from compsognathus.core.registry import get_parser
+from compsognathus.core.registry import get_parser, get_schema
 from compsognathus.downloader import DownloadResult, download_all
 
 # Importa os plugins para que se auto-registrem via @register
@@ -27,20 +29,44 @@ import compsognathus.plugins  # noqa: F401
 logger = logging.getLogger(__name__)
 
 
-def _parse_html_file(filepath: Path, url: str) -> ScrapedRecord | None:
-    """Lê um HTML salvo em disco e executa o parser do domínio correto."""
+def _fallback_site(url: str) -> str:
+    host = (urlparse(url).hostname or "").lower()
+    return host[4:] if host.startswith("www.") else host or "unknown"
+
+
+def _parse_html_file(filepath: Path, url: str) -> ScrapedRecord:
+    """Lê um HTML salvo em disco e converte falhas de parse em registro auditável."""
     try:
         parser_fn = get_parser(url)
     except ValueError as exc:
         logger.warning("Plugin ausente: %s", exc)
-        return None
+        return ScrapedRecord(
+            url=url,
+            site=_fallback_site(url),
+            parse_ok=False,
+            parse_errors=[f"plugin: {exc}"],
+        )
 
     try:
         html = filepath.read_text(encoding="utf-8")
-        return parser_fn(html, url)
+        record = parser_fn(html, url)
+        schema = get_schema(url)
+        missing = [
+            field for field in schema
+            if field not in record.fields
+            or record.fields[field] is None
+            or (isinstance(record.fields[field], str) and not record.fields[field].strip())
+        ]
+        errors = list(dict.fromkeys([*record.parse_errors, *[f"missing: {field}" for field in missing]]))
+        return record.model_copy(update={"parse_ok": record.parse_ok and not missing, "parse_errors": errors})
     except Exception as exc:
         logger.error("Erro ao parsear %s: %s", url, exc)
-        return None
+        return ScrapedRecord(
+            url=url,
+            site=_fallback_site(url),
+            parse_ok=False,
+            parse_errors=[f"parse: {type(exc).__name__}: {exc}"],
+        )
 
 
 def export_dataframe(df: pd.DataFrame, output_path: Path, fmt: str) -> None:
@@ -66,7 +92,7 @@ def export_dataframe(df: pd.DataFrame, output_path: Path, fmt: str) -> None:
         df.to_json(output_path, orient="records", lines=True, force_ascii=False)
     elif fmt_lower in ("sqlite", "db"):
         table_name = "scraped_data"
-        with sqlite3.connect(output_path) as conn:
+        with closing(sqlite3.connect(output_path)) as conn:
             df.to_sql(table_name, conn, if_exists="replace", index=False)
     else:
         raise ValueError(f"Formato de exportação não suportado: '{fmt}'. Use: parquet, csv, json, jsonl, sqlite.")
@@ -110,16 +136,20 @@ def scrape(
 
     # ── ETAPA 2: Parse ────────────────────────────────────────────────────────
     logger.info("Etapa 2/3: Parseando HTMLs...")
-    records: list[ScrapedRecord] = []
+    records: list[tuple[ScrapedRecord, DownloadResult]] = []
 
     for result in download_results:
         if not result.ok or result.filepath is None:
             logger.warning("Pulando URL com falha no download: %s", result.url)
-            continue
-
-        record = _parse_html_file(result.filepath, result.url)
-        if record:
-            records.append(record)
+            record = ScrapedRecord(
+                url=result.url,
+                site=_fallback_site(result.url),
+                parse_ok=False,
+                parse_errors=[f"download: {result.error or 'falha desconhecida'}"],
+            )
+        else:
+            record = _parse_html_file(result.filepath, result.url)
+        records.append((record, result))
 
     if not records:
         logger.warning("Nenhum registro extraído. Verifique as URLs e os plugins disponíveis.")
@@ -129,15 +159,22 @@ def scrape(
     logger.info("Etapa 3/3: Exportando %d registros → %s (formato: %s)", len(records), output_path, fmt)
 
     rows = []
-    for rec in records:
+    reserved_fields = {"url", "site", "data_coleta", "parse_ok", "parse_errors", "download_ok", "download_method", "download_error"}
+    for rec, download in records:
         row = {
             "url": rec.url,
             "site": rec.site,
             "data_coleta": rec.data_coleta,
             "parse_ok": rec.parse_ok,
             "parse_errors": ", ".join(rec.parse_errors),
+            "download_ok": download.ok,
+            "download_method": download.method,
+            "download_error": download.error,
         }
-        row.update(rec.fields)
+        conflicting = reserved_fields.intersection(rec.fields)
+        if conflicting:
+            logger.warning("Campos reservados ignorados no parser %s: %s", rec.site, sorted(conflicting))
+        row.update({key: value for key, value in rec.fields.items() if key not in reserved_fields})
         rows.append(row)
 
     df = pd.DataFrame(rows)
