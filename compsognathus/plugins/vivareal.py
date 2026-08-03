@@ -7,12 +7,12 @@ VivaReal e ZAP Imóveis pertencem ao mesmo grupo (OLX Group) e compartilham
 a estrutura __NEXT_DATA__ com campos idênticos. Por isso este plugin reutiliza
 a mesma lógica de extração, com seletores CSS adaptados ao tema VivaReal.
 """
-import json
 import re
 from bs4 import BeautifulSoup
 
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
+from compsognathus.plugins._next_data import iter_next_payloads
 
 
 # ── Helpers de limpeza (idênticos ao ZAP — mesma estrutura de dados) ─────────
@@ -54,16 +54,15 @@ def _clean_int(text: str) -> int | None:
 def _extract_next_data(soup: BeautifulSoup) -> dict:
     """Extrai dados do JSON __NEXT_DATA__ injetado pelo Next.js."""
     data: dict = {}
-    script = soup.find("script", id="__NEXT_DATA__")
-    if not script or not script.string:
-        return data
-
     try:
-        payload = json.loads(script.string)
-
         def _find_listing(obj):
             if isinstance(obj, dict):
-                if "usableAreas" in obj or "pricingInfos" in obj or "bedrooms" in obj:
+                if (
+                    "usableAreas" in obj
+                    or "pricingInfos" in obj
+                    or "bedrooms" in obj
+                    or ("prices" in obj and "amenities" in obj)
+                ):
                     return obj
                 for v in obj.values():
                     res = _find_listing(v)
@@ -76,7 +75,11 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
                         return res
             return None
 
-        listing = _find_listing(payload)
+        listing = None
+        for payload in iter_next_payloads(soup):
+            listing = _find_listing(payload)
+            if listing:
+                break
         if not isinstance(listing, dict):
             return data
 
@@ -86,9 +89,13 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
             data["preco"] = float(pricing[0].get("price", 0)) or None
         elif isinstance(pricing, dict):
             data["preco"] = float(pricing.get("price", 0)) or None
+        else:
+            sale = (listing.get("prices") or {}).get("sale") or {}
+            data["preco"] = float(sale.get("value", 0)) or None
 
         # Áreas
-        areas = listing.get("usableAreas") or listing.get("usableArea")
+        amenities = listing.get("amenities") or {}
+        areas = listing.get("usableAreas") or listing.get("usableArea") or amenities.get("usableAreas")
         if isinstance(areas, list) and areas:
             data["area_privativa"] = float(areas[0])
         elif isinstance(areas, (int, float, str)):
@@ -107,7 +114,7 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
             ("vagas", ["parkingSpaces", "parkingSpace"]),
         ]:
             for k in keys_en:
-                val = listing.get(k)
+                val = listing.get(k) if k in listing else amenities.get(k)
                 if isinstance(val, list) and val:
                     data[key_pt] = int(val[0])
                     break

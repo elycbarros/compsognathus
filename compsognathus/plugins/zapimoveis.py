@@ -14,6 +14,7 @@ from bs4 import BeautifulSoup
 
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
+from compsognathus.plugins._next_data import iter_next_payloads
 
 
 # ── Helpers de limpeza de texto ───────────────────────────────────────────────
@@ -63,17 +64,16 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
     antes de qualquer formatação HTML. É mais estável que seletores CSS.
     """
     data: dict = {}
-    script = soup.find("script", id="__NEXT_DATA__")
-    if not script or not script.string:
-        return data
-
     try:
-        payload = json.loads(script.string)
-
         # Percorre o JSON recursivamente buscando o objeto do anúncio
         def _find_listing(obj):
             if isinstance(obj, dict):
-                if "usableAreas" in obj or "pricingInfos" in obj or "bedrooms" in obj:
+                if (
+                    "usableAreas" in obj
+                    or "pricingInfos" in obj
+                    or "bedrooms" in obj
+                    or ("prices" in obj and "amenities" in obj)
+                ):
                     return obj
                 for v in obj.values():
                     res = _find_listing(v)
@@ -86,7 +86,11 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
                         return res
             return None
 
-        listing = _find_listing(payload)
+        listing = None
+        for payload in iter_next_payloads(soup):
+            listing = _find_listing(payload)
+            if listing:
+                break
         if not isinstance(listing, dict):
             return data
 
@@ -98,9 +102,13 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
             data["preco"] = float(pricing.get("price", 0)) or None
         elif listing.get("price"):
             data["preco"] = float(listing["price"])
+        else:
+            sale = (listing.get("prices") or {}).get("sale") or {}
+            data["preco"] = float(sale.get("value", 0)) or None
 
         # Área útil e total
-        areas = listing.get("usableAreas") or listing.get("usableArea")
+        amenities = listing.get("amenities") or {}
+        areas = listing.get("usableAreas") or listing.get("usableArea") or amenities.get("usableAreas")
         if isinstance(areas, list) and areas:
             data["area_privativa"] = float(areas[0])
         elif isinstance(areas, (int, float, str)):
@@ -119,7 +127,7 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
             ("vagas", ["parkingSpaces", "parkingSpace"]),
         ]:
             for k in keys_en:
-                val = listing.get(k)
+                val = listing.get(k) if k in listing else amenities.get(k)
                 if isinstance(val, list) and val:
                     data[key_pt] = int(val[0])
                     break
@@ -141,7 +149,7 @@ def _extract_next_data(soup: BeautifulSoup) -> dict:
         # Descrição e anunciante
         if listing.get("description"):
             data["descricao"] = str(listing["description"])[:2000]
-        pub = listing.get("publisher", {})
+        pub = listing.get("publisher") or listing.get("advertiser", {})
         if isinstance(pub, dict) and pub.get("name"):
             data["anunciante"] = str(pub["name"])
 

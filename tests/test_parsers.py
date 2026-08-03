@@ -9,6 +9,7 @@ Por que fixtures sintéticas?
     sem depender de conexão com a internet ou de sites que podem mudar.
 """
 from pathlib import Path
+import json
 import pytest
 
 # Diretório onde estão os HTMLs de exemplo
@@ -89,6 +90,22 @@ class TestZapImoveisParser:
         assert rec.fields["quartos"] is None
         assert rec.fields["area_privativa"] == 1_250.0
 
+    def test_extrai_payload_next_f_atual(self):
+        from compsognathus.plugins.zapimoveis import parse
+
+        listing = {
+            "prices": {"sale": {"value": 548000}},
+            "amenities": {"usableAreas": [80], "bedrooms": [2], "parkingSpaces": [1]},
+            "address": {"neighborhood": "Bela Vista", "city": "Palhoça", "state": "SC"},
+        }
+        payload = ["$", "$L1", None, {"baseData": {"pageData": {"listing": listing}}}]
+        encoded = json.dumps("1:" + json.dumps(payload, separators=(",", ":")))
+
+        html = f"<html><script>self.__next_f.push([1,{encoded}])</script></html>"
+        rec = parse(html, "https://www.zapimoveis.com.br/imovel/casa-123")
+        assert rec.parse_ok is True
+        assert rec.fields["preco"] == 548000.0
+        assert rec.fields["quartos"] == 2
 
 # ── VivaReal ──────────────────────────────────────────────────────────────────
 
@@ -140,6 +157,22 @@ class TestVivaRealParser:
         assert rec.fields["quartos"] is None
         assert rec.fields["area_privativa"] == 2_500.0
 
+    def test_extrai_payload_next_f_atual(self):
+        from compsognathus.plugins.vivareal import parse
+
+        listing = {
+            "prices": {"sale": {"value": 390000}},
+            "amenities": {"usableAreas": [60], "bedrooms": [2], "parkingSpaces": [2]},
+            "address": {"neighborhood": "Guarda do Cubatão", "city": "Palhoça", "state": "SC"},
+        }
+        payload = ["$", "$L1", None, {"baseData": {"pageData": {"listing": listing}}}]
+        encoded = json.dumps("1:" + json.dumps(payload, separators=(",", ":")))
+
+        html = f"<html><script>self.__next_f.push([1,{encoded}])</script></html>"
+        rec = parse(html, "https://www.vivareal.com.br/imovel/casa-123")
+        assert rec.parse_ok is True
+        assert rec.fields["preco"] == 390000.0
+        assert rec.fields["bairro"] == "Guarda do Cubatão"
 
 # ── Mercado Livre ─────────────────────────────────────────────────────────────
 
