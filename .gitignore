@@ -1,0 +1,33 @@
+# Dados gerados pelo scraper (não entram no git)
+data/html/
+data/output/
+*.parquet
+*.csv
+
+# Ambientes virtuais
+.venv/
+venv/
+env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Build
+dist/
+build/
+*.egg-info/
+
+# Logs
+*.log
+compsognathus.log
+
+# macOS
+.DS_Store
+
+# IDEs
+.vscode/
+.idea/
