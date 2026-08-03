@@ -1,6 +1,6 @@
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
 
 [project]
 name = "compsognathus"
@@ -9,7 +9,7 @@ description = "Generic plugin-based web scraper CLI — extract structured data 
 readme = "README.md"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-authors = [{name = "Ely Barros", email = ""}]
+authors = [{name = "Ely Barros"}]
 keywords = ["scraping", "web-scraping", "cli", "playwright", "data-extraction", "parser"]
 classifiers = [
     "Development Status :: 4 - Beta",
