@@ -1,0 +1,47 @@
+# Continuous Integration — roda pytest a cada push e pull request
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    name: pytest (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+
+    steps:
+      # 1. Faz checkout do código
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # 2. Instala a versão correta de Python
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # 3. Cache do pip para acelerar builds subsequentes
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # 4. Instala o pacote com dependências de desenvolvimento
+      # why: os testes usam fixtures HTML locais — não precisam do browser Playwright
+      - name: Install dependencies
+        run: pip install -e ".[dev]"
+
+      # 5. Executa os testes com relatório de cobertura
+      - name: Run tests
+        run: pytest tests/ -v --tb=short --cov=compsognathus --cov-report=term-missing
