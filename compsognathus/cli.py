@@ -47,16 +47,23 @@ def _setup_logging(verbose: bool = False) -> None:
 def _read_urls(source: str) -> list[str]:
     """Lê URLs de um arquivo .txt ou de uma string de URL única."""
     if source.startswith("http://") or source.startswith("https://"):
-        return [source.strip()]
+        return [source.strip().strip('"\'')]
 
     path = Path(source)
     if not path.exists():
         console.print(f"[red]❌ Arquivo não encontrado: {source}[/red]")
         raise typer.Exit(1)
 
-    urls = [line.strip() for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    raw_lines = path.read_text(encoding="utf-8").splitlines()
+    urls = []
+    for line in raw_lines:
+        clean = line.strip().strip('"\'')
+        # Ignora linhas vazias e comentários iniciados por '#' ou '//'
+        if clean and not clean.startswith("#") and not clean.startswith("//"):
+            urls.append(clean)
+
     if not urls:
-        console.print("[red]❌ Nenhuma URL encontrada no arquivo.[/red]")
+        console.print("[red]❌ Nenhuma URL válida encontrada no arquivo.[/red]")
         raise typer.Exit(1)
 
     return urls
