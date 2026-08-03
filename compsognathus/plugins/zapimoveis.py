@@ -9,49 +9,14 @@ Estratégia de extração em 3 camadas (da mais confiável para a mais frágil):
     3. JSON-LD        — metadados Schema.org embutidos em <script> tags
 """
 import json
-import re
 from bs4 import BeautifulSoup
 
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
 from compsognathus.plugins._next_data import iter_next_payloads
-
-
-# ── Helpers de limpeza de texto ───────────────────────────────────────────────
-
-def _clean_price(text: str) -> float | None:
-    """Extrai valor numérico de string de preço ('R$ 450.000' → 450000.0)."""
-    match = re.search(r"\d[\d.]*(?:,\d{1,2})?(?![\d.,])", text)
-    if not match:
-        return None
-    number = match.group(0)
-    if "," in number:
-        number = number.replace(".", "").replace(",", ".")
-    elif number.count(".") and len(number.rsplit(".", 1)[1]) == 3:
-        number = number.replace(".", "")
-    val = float(number)
-    return val if val and val >= 10_000 else None  # filtra valores fisicamente impossíveis
-
-
-def _clean_area(text: str) -> float | None:
-    """Extrai área em m² de um texto ('80 m²' → 80.0)."""
-    m = re.search(r"([\d.]+(?:,\d+)?)\s*m", text)
-    if not m:
-        return None
-    number = m.group(1)
-    if "," in number:
-        number = number.replace(".", "").replace(",", ".")
-    elif number.count(".") and len(number.rsplit(".", 1)[1]) == 3:
-        number = number.replace(".", "")
-    val = float(number)
-    return val if val and 10.0 <= val <= 100_000.0 else None  # intervalo físico plausível
-
-
-def _clean_int(text: str) -> int | None:
-    """Extrai o primeiro inteiro de um texto ('3 quartos' → 3)."""
-    m = re.search(r"\d+", text)
-    val = int(m.group(0)) if m else None
-    return val if val is not None and 0 <= val <= 50 else None
+from compsognathus.plugins._real_estate import clean_area as _clean_area
+from compsognathus.plugins._real_estate import clean_int as _clean_int
+from compsognathus.plugins._real_estate import clean_price as _clean_price
 
 
 # ── Camada 1: __NEXT_DATA__ ───────────────────────────────────────────────────

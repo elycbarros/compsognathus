@@ -1,6 +1,9 @@
 # Como criar um Plugin para o Compsognathus
 
-Este guia mostra como criar um parser para qualquer site em **menos de 20 linhas de Python**.
+Este guia mostra dois caminhos: um **exemplo mínimo** para entender o contrato
+de um plugin e um **template robusto** para adaptar a sites reais. Um parser
+mínimo cabe em poucas linhas; um parser confiável normalmente precisa de
+tratamento de campos ausentes, conversão de valores e testes.
 
 ---
 
@@ -24,7 +27,8 @@ from compsognathus.core.registry import register
 @register("dominio.com.br", schema=["campo1", "campo2"])
 def parse(html: str, url: str) -> ScrapedRecord:
     soup = BeautifulSoup(html, "html.parser")
-    campo1 = soup.find("h1").get_text(strip=True)
+    h1 = soup.find("h1")
+    campo1 = h1.get_text(strip=True) if h1 else None
     return ScrapedRecord(
         url=url,
         site="meusite",
@@ -41,9 +45,10 @@ def parse(html: str, url: str) -> ScrapedRecord:
 Abra o site no navegador, vá em **F12 → Elements** e identifique:
 - Onde está o dado que você quer? (`<h1>`, `<span class="price">`, etc.)
 - O site usa JSON-LD? (`<script type="application/ld+json">`)
-- O site usa Next.js? (procure `<script id="__NEXT_DATA__">`)
+- O site usa Next.js? Procure `__NEXT_DATA__` ou `self.__next_f.push`.
 
-> **Dica:** Dados em JSON-LD e `__NEXT_DATA__` são mais estáveis que seletores CSS, que mudam a cada redesign do site.
+> **Dica:** Dados em JSON-LD e payloads do Next.js são mais estáveis que
+> seletores CSS, que podem mudar a cada redesign do site.
 
 ### 2. Copie o template
 
@@ -104,14 +109,19 @@ for script in soup.find_all("script", type="application/ld+json"):
         preco = data["offers"]["price"]
 ```
 
-### Estratégia 2: JSON embutido (Next.js / __NEXT_DATA__) ✅ Estável
+### Estratégia 2: JSON embutido (Next.js) ✅ Estável
 
-Sites construídos com Next.js injetam todos os dados da página em um JSON.
+Sites construídos com Next.js podem incluir dados em `__NEXT_DATA__` (modelo
+mais antigo) ou em chamadas `self.__next_f.push` (React Flight, modelo atual).
+O projeto já oferece `iter_next_payloads()` para lidar com ambos; prefira esse
+helper em vez de repetir a lógica de decodificação no plugin.
 
 ```python
-script = soup.find("script", id="__NEXT_DATA__")
-payload = json.loads(script.string)
-# Percorra o payload recursivamente para encontrar os dados
+from compsognathus.plugins._next_data import iter_next_payloads
+
+for payload in iter_next_payloads(soup):
+    # Percorra cada payload recursivamente para encontrar os dados.
+    pass
 ```
 
 ### Estratégia 3: Seletores CSS 🟡 Funcional (mas frágil)

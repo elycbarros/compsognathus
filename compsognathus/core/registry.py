@@ -14,14 +14,29 @@ Adicionar um novo plugin é tão simples quanto:
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Callable
 from urllib.parse import urlparse
 
 from compsognathus.core.record import ScrapedRecord
 
-# Dicionário global: domínio → (função_parse, lista_de_campos_esperados)
-# why: populado automaticamente pelo decorator, evita registro manual
-_REGISTRY: dict[str, tuple[Callable[[str, str], ScrapedRecord], list[str]]] = {}
+Parser = Callable[[str, str], ScrapedRecord]
+
+
+@dataclass(frozen=True)
+class PluginRegistration:
+    """Contrato explícito de um plugin registrado.
+
+    A classe nomeia os dois valores que antes formavam uma tupla, facilitando
+    a leitura para quem está aprendendo como o decorator registra plugins.
+    """
+
+    parser: Parser
+    schema: tuple[str, ...]
+
+
+# Dicionário global: domínio → contrato do plugin.
+_REGISTRY: dict[str, PluginRegistration] = {}
 
 
 def _host_for_url(url: str) -> str:
@@ -30,7 +45,7 @@ def _host_for_url(url: str) -> str:
     return host[4:] if host.startswith("www.") else host
 
 
-def _find_registration(url: str):
+def _find_registration(url: str) -> PluginRegistration | None:
     host = _host_for_url(url)
     if not host:
         return None
@@ -40,7 +55,7 @@ def _find_registration(url: str):
     return None
 
 
-def register(domain: str, schema: list[str] | None = None):
+def register(domain: str, schema: list[str] | None = None) -> Callable[[Parser], Parser]:
     """Decorator que registra uma função parse para um domínio.
 
     Args:
@@ -59,9 +74,9 @@ def register(domain: str, schema: list[str] | None = None):
     if not normalized_domain or any(char in normalized_domain for char in "/:@"):
         raise ValueError(f"Domínio inválido para registro: {domain!r}")
 
-    def decorator(fn: Callable[[str, str], ScrapedRecord]) -> Callable[[str, str], ScrapedRecord]:
+    def decorator(fn: Parser) -> Parser:
         # PLUGIN HOOK: cada @register adiciona uma entrada ao dicionário global
-        _REGISTRY[normalized_domain] = (fn, schema or [])
+        _REGISTRY[normalized_domain] = PluginRegistration(fn, tuple(schema or ()))
         return fn
     return decorator
 
@@ -79,7 +94,7 @@ def get_parser(url: str) -> Callable[[str, str], ScrapedRecord]:
     # Aceita o domínio exato e seus subdomínios, sem confundir domínios impostores.
     registration = _find_registration(url)
     if registration:
-        return registration[0]
+        return registration.parser
 
     registered = list(_REGISTRY.keys())
     raise ValueError(
@@ -93,7 +108,7 @@ def get_schema(url: str) -> list[str]:
     """Retorna os campos de qualidade declarados pelo plugin da URL."""
     registration = _find_registration(url)
     if registration:
-        return list(registration[1])
+        return list(registration.schema)
     raise ValueError(f"Nenhum plugin registrado para: {url!r}")
 
 
@@ -103,12 +118,12 @@ def list_plugins() -> list[dict]:
     Usado pelo comando 'comps plugins list'.
     """
     result = []
-    for domain, (fn, schema) in _REGISTRY.items():
+    for domain, registration in _REGISTRY.items():
         # Extrai a primeira linha da docstring como descrição curta
-        doc = (fn.__doc__ or "").strip().split("\n")[0]
+        doc = (registration.parser.__doc__ or "").strip().split("\n")[0]
         result.append({
             "domain": domain,
-            "schema": ", ".join(schema) if schema else "–",
+            "schema": ", ".join(registration.schema) if registration.schema else "–",
             "description": doc,
         })
     return result

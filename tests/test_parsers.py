@@ -8,22 +8,7 @@ Por que fixtures sintéticas?
     Fixtures fabricadas permitem testar casos específicos de forma determinística,
     sem depender de conexão com a internet ou de sites que podem mudar.
 """
-from pathlib import Path
 import json
-import pytest
-
-# Diretório onde estão os HTMLs de exemplo
-FIXTURES = Path(__file__).parent / "fixtures"
-
-
-@pytest.fixture
-def load_fixture():
-    """Fixture pytest que retorna uma função para ler HTMLs de teste."""
-    def _load(name: str) -> str:
-        path = FIXTURES / name
-        assert path.exists(), f"Fixture não encontrada: {path}"
-        return path.read_text(encoding="utf-8")
-    return _load
 
 
 # ── ZAP Imóveis ───────────────────────────────────────────────────────────────

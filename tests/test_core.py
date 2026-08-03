@@ -6,7 +6,7 @@ from contextlib import closing
 import pandas as pd
 import pytest
 from compsognathus.core.record import ScrapedRecord
-from compsognathus.core.registry import _REGISTRY, get_parser, get_schema, list_plugins, register
+from compsognathus.core.registry import PluginRegistration, _REGISTRY, get_parser, get_schema, list_plugins, register
 from compsognathus.scraper import export_dataframe
 
 
@@ -98,6 +98,16 @@ class TestRegistry:
             return ScrapedRecord(url=url, site="schema")
 
         assert get_schema("https://schema-test.com/item") == ["titulo", "preco"]
+
+    def test_registro_tem_campos_nomeados(self):
+        @register("registro-nomeado.com", schema=["titulo"])
+        def _parse_nomeado(html, url):
+            return ScrapedRecord(url=url, site="nomeado")
+
+        registration = _REGISTRY["registro-nomeado.com"]
+        assert isinstance(registration, PluginRegistration)
+        assert registration.parser is _parse_nomeado
+        assert registration.schema == ("titulo",)
 
     @pytest.mark.parametrize(
         "url",

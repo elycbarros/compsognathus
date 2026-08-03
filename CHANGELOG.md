@@ -5,6 +5,20 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+## [Em desenvolvimento]
+
+### Melhorado
+- Documentação e scaffolding agora distinguem o exemplo mínimo do template robusto e tratam campos HTML ausentes de forma explícita.
+- README reorganizado em torno de início rápido, capacidades, qualidade, contribuição e uso responsável.
+- README agora apresenta demonstração visual, validação real anonimizada e decisões técnicas com seus trade-offs.
+- CI ampliado com Ruff e matriz de testes do Python 3.11 ao 3.14.
+- Suíte ampliada para 81 testes; cobertura total chegou a 80% e o downloader a 90%.
+- Leitura de datasets foi centralizada para manter `comps report` e `comps validate` consistentes.
+- Registro de plugins passou a usar um contrato nomeado, mais fácil de compreender e tipar.
+- Fixtures HTML foram centralizadas em `tests/conftest.py`.
+
+---
+
 ## [1.3.1] — 2026-08-03
 
 ### Corrigido

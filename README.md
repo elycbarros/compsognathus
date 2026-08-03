@@ -1,220 +1,172 @@
 # Compsognathus 🦕
 
-> **Framework genérico de web scraping por plugins** — extraia dados estruturados de qualquer site com uma CLI simples e arquitetura extensível.
-
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![Tests](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml/badge.svg)](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
----
+Compsognathus é um framework de web scraping orientado a plugins. Ele deixa o
+trabalho repetitivo — baixar páginas, tentar novamente, identificar o parser,
+validar os dados e exportar o resultado — a cargo da CLI, para que cada plugin
+se concentre apenas em extrair os dados do seu domínio.
 
-## O que é
+O projeto foi pensado para ser fácil de aprender e suficientemente estruturado
+para uso real: exemplos mínimos explicam o contrato do plugin e templates
+robustos ajudam a lidar com HTML incompleto e dados variáveis.
 
-Compsognathus é um framework de scraping orientado a **plugins**. Você registra um plugin para um domínio (com ~20 linhas de Python) e a CLI cuida do resto: download com Playwright, retry automático, exportação em Parquet/CSV e relatório de qualidade.
+![Demonstração da CLI do Compsognathus](docs/assets/cli-demo.svg)
 
-**Plugins bundled — 5 plugins em 3 segmentos:**
+## O que ele oferece
 
-| Plugin | Site | Campos extraídos |
-|---|---|---|
-| `zapimoveis` | zapimoveis.com.br | preço, área, quartos, bairro, endereço |
-| `vivareal` | vivareal.com.br | preço, área, quartos, bairro, endereço |
-| `mercadolivre` | mercadolivre.com.br | produto, preço, avaliação, vendedor, condição |
-| `catho` | catho.com.br | cargo, empresa, salário, cidade, regime |
-| `books_toscrape` | books.toscrape.com | título, preço, avaliação, disponibilidade, UPC |
+- Plugins registrados por domínio, com despacho automático pela URL.
+- Download resiliente com Playwright e fallback HTTP.
+- Extração em camadas: dados estruturados, seletores CSS e metatags.
+- Exportação para Parquet, CSV, JSON, JSONL e SQLite.
+- Diagnóstico de downloads, parsing e campos obrigatórios com `comps validate`.
+- Scaffold que cria plugin, fixture e teste em um comando.
 
----
+Plugins incluídos: ZAP Imóveis, VivaReal, Mercado Livre, Catho e Books to Scrape.
 
-## Arquitetura
+## Validação com dados reais
 
-```
-URL
- │
- ▼
-downloader.py          ← Playwright (headless) + httpx (fallback)
- │                       Delay anti-rate-limit · Retry com backoff exponencial
- ▼
-HTML salvo em disco
- │
- ▼
-registry.py            ← Detecta o domínio e despacha para o plugin correto
- │
- ▼
-plugin/[site].py       ← Extração em camadas: JSON-LD → CSS → meta tags
- │
- ▼
-ScrapedRecord          ← Modelo genérico: fields: dict[str, Any]
- │
- ▼
-scraper.py             ← Achata fields em colunas do DataFrame
- │
- ▼
-dados.parquet / .csv   ← Saída final
-```
+Além das fixtures sintéticas, a versão 1.3.1 foi validada com uma amostra real
+e anonimizada de páginas do ZAP Imóveis e VivaReal:
 
----
+| Métrica | Resultado |
+|---|---:|
+| URLs processadas | 8 |
+| Downloads concluídos | 8/8 |
+| Parses completos | 8/8 |
+| Colunas exportadas | 18 |
 
-## Setup
+As URLs e os HTMLs reais não fazem parte do repositório para evitar publicar
+dados de terceiros. A suíte automatizada usa equivalentes sintéticos e
+determinísticos das estruturas observadas.
+
+## Início rápido
+
+Você precisa de Python 3.11+ e do Chromium usado pelo Playwright.
 
 ```bash
-# 1. Clone e entre no diretório
-git clone https://github.com/seu-usuario/compsognathus.git
+git clone https://github.com/elycbarros/compsognathus.git
 cd compsognathus
 
-# 2. Instale o pacote e as dependências
+python -m venv .venv
+source .venv/bin/activate
 pip install -e ".[dev]"
-
-# 3. Instale o Chromium para o Playwright
 playwright install chromium
 ```
 
----
-
-## Uso
-
-### Scraping a partir de arquivo de URLs
+Crie um arquivo `links.txt` com uma URL HTTP(S) por linha e execute:
 
 ```bash
-# Crie um arquivo com as URLs (uma por linha)
-echo "https://www.zapimoveis.com.br/imovel/..." > links.txt
-
-# Valide as URLs e os plugins disponíveis sem realizar downloads (Dry-Run)
+# Confirme os plugins disponíveis antes de baixar qualquer página.
 comps scrape links.txt --dry-run
 
-# Raspe e exporte em Parquet (padrão)
+# Raspe e exporte o dataset.
 comps scrape links.txt --output dados.parquet
 
-# Raspe em paralelo (3 threads simultâneas) e exporte em SQLite / JSON / JSONL
-comps scrape links.txt --format sqlite --output banco.db --concurrency 3
-comps scrape links.txt --format jsonl --output dados.jsonl
-```
-
-### Relatório de qualidade (Console & HTML)
-
-```bash
-# Relatório rápido no terminal
-comps report dados.parquet
-
-# Validar qualidade e listar falhas do dataset
-comps validate dados.parquet
+# Inspecione a qualidade da coleta.
 comps validate dados.parquet --fail-on-error
-
-# Gerar relatório visual interativo em HTML
 comps report dados.parquet --html relatorio.html
 ```
 
----
+Para outros formatos e concorrência:
 
-## Adicionando um novo plugin
+```bash
+comps scrape links.txt --format sqlite --output dados.db --concurrency 3
+comps scrape links.txt --format jsonl --output dados.jsonl
+```
 
-### Opção 1: Gerador Automático (Scaffolding em 1 comando)
+## Como funciona
+
+```text
+URLs → downloader → HTML → registry → plugin → ScrapedRecord → dataset
+```
+
+O `registry` escolhe o plugin pelo domínio. O plugin retorna um `ScrapedRecord`
+com metadados fixos e um dicionário livre de campos; o orquestrador transforma
+esses registros em um dataset exportável.
+
+### Decisões técnicas
+
+| Decisão | Motivação | Trade-off |
+|---|---|---|
+| Plugins por domínio | Isola mudanças frequentes de cada site | Cada domínio precisa de manutenção própria |
+| Playwright com fallback HTTP | Combina páginas renderizadas e downloads rápidos | O navegador consome mais recursos |
+| Preservar registros com falha | Mantém o dataset auditável e permite reprocessamento | A saída inclui linhas incompletas |
+| Fixtures sintéticas | Testes rápidos, seguros e reproduzíveis | Não substituem validações periódicas com páginas reais |
+
+## Criando um plugin
+
+O caminho mais rápido cria código inicial, fixture sintética e teste:
 
 ```bash
 comps plugins new olx.com.br
 ```
-Este comando gera automaticamente o código inicial do plugin, a fixture, o teste e o registro do import.
 
-### Opção 2: Manual
+Depois, adapte os seletores ao HTML real e execute a suíte. Para aprender a
+estrutura com calma, use o [template comentado](compsognathus/plugins/example_generic.py)
+e o [guia de criação de plugins](docs/writing-a-plugin.md).
 
-Crie um novo parser em **20 linhas**. Veja o template comentado em [`plugins/example_generic.py`](compsognathus/plugins/example_generic.py) e o tutorial completo em [`docs/writing-a-plugin.md`](docs/writing-a-plugin.md).
-
-Saída:
-```
-📊 Relatório: dados.parquet
-
-Total de registros    12
-Registros completos   11/12 (91%)
-Sites coletados       zapimoveis, vivareal
-Colunas               10
-
-Estatísticas numéricas:
-┌───────────────┬──────────────┬──────────┬──────────────┐
-│ Campo         │ Média        │ Mín      │ Máx          │
-├───────────────┼──────────────┼──────────┼──────────────┤
-│ preco         │ 650,000.00   │ 320,000  │ 1,200,000    │
-└───────────────┴──────────────┴──────────┴──────────────┘
-```
-
-### Listar plugins disponíveis
-
-```bash
-comps plugins list
-```
-
----
-
-## Exemplo de plugin
-
-Crie um novo parser em **20 linhas**. Veja o template comentado em [`plugins/example_generic.py`](compsognathus/plugins/example_generic.py) e o tutorial completo em [`docs/writing-a-plugin.md`](docs/writing-a-plugin.md).
+Um plugin mínimo segue este contrato:
 
 ```python
-# compsognathus/plugins/meusite.py
 from bs4 import BeautifulSoup
+
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
 
-@register("meusite.com.br", schema=["titulo", "preco"])
+
+@register("meusite.com.br", schema=["titulo"])
 def parse(html: str, url: str) -> ScrapedRecord:
     soup = BeautifulSoup(html, "html.parser")
-    titulo = soup.find("h1").get_text(strip=True)
+    h1 = soup.find("h1")
+    titulo = h1.get_text(strip=True) if h1 else None
     return ScrapedRecord(url=url, site="meusite", fields={"titulo": titulo})
 ```
 
-Depois, adicione o import em `compsognathus/plugins/__init__.py`:
-```python
-import compsognathus.plugins.meusite  # noqa: F401
-```
+## Qualidade e testes
 
-Pronto. O comando `comps plugins list` já reconhecerá seu plugin.
-
----
-
-## Testes
+Use estes comandos antes de enviar alterações:
 
 ```bash
-# Executa toda a suíte de testes
-pytest tests/ -v
-
-# Com cobertura de código
-pytest tests/ --cov=compsognathus --cov-report=term-missing
+ruff check .
+pytest -q
+pytest --cov=compsognathus --cov-report=term-missing
 ```
 
----
+As fixtures em `tests/fixtures/` são sintéticas. Isso mantém os testes rápidos,
+reproduzíveis e independentes dos sites externos.
 
 ## Estrutura do projeto
 
-```
+```text
 compsognathus/
-├── compsognathus/
-│   ├── core/
-│   │   ├── record.py       # ScrapedRecord — modelo genérico de dados
-│   │   └── registry.py     # @register decorator + dispatcher por domínio
-│   ├── plugins/
-│   │   ├── zapimoveis.py   # Plugin: imóveis (ZAP)
-│   │   ├── vivareal.py     # Plugin: imóveis (VivaReal)
-│   │   ├── mercadolivre.py # Plugin: e-commerce (Mercado Livre)
-│   │   ├── catho.py        # Plugin: vagas (Catho)
-│   │   └── example_generic.py  # Template didático para novos plugins
-│   ├── downloader.py       # Playwright + httpx com retry e anti-rate-limit
-│   ├── scraper.py          # Orquestrador: download → parse → export
-│   └── cli.py              # Interface CLI (typer + rich)
-├── tests/
-│   ├── fixtures/           # HTMLs sintéticos para testes determinísticos
-│   ├── test_core.py        # Testes do ScrapedRecord e registry
-│   └── test_parsers.py     # Testes de todos os parsers com fixtures
-└── docs/
-    └── writing-a-plugin.md # Tutorial: crie um parser em 20 linhas
+├── core/          # modelo ScrapedRecord e registro de plugins
+├── plugins/       # parsers e helpers compartilhados
+├── downloader.py  # Playwright, HTTP e tentativas de download
+├── scraper.py     # orquestra download, parse e exportação
+├── datasets.py    # leitura compartilhada por report e validate
+└── cli.py         # comandos da interface
+
+tests/             # testes e fixtures HTML sintéticas
+docs/              # documentação aprofundada
 ```
 
----
+## Contribuindo
 
-## Por que "Compsognathus"?
+Contribuições são bem-vindas. Mantenha alterações pequenas, inclua testes para
+novos comportamentos e execute lint e testes antes de abrir um pull request.
+Para novos sites, prefira dados estruturados (JSON-LD ou Next.js) antes de
+seletores CSS frágeis.
 
-O Compsognathus foi um dos menores dinossauros conhecidos — ágil, eficiente e adaptável. Como este framework: leve o suficiente para rodar com `pip install`, mas poderoso o suficiente para raspar qualquer site.
+## Segurança e uso responsável
 
-Inspirado no RAPTOR 🦖, seu primo maior — uma ferramenta interna de scraping imobiliário com stack MLOps completa.
-
----
+Respeite os termos de uso, limites de acesso e políticas dos sites coletados.
+Não inclua credenciais, cookies, dados pessoais ou páginas reais sensíveis nas
+fixtures. Para relatar uma vulnerabilidade, use uma divulgação privada pelo
+repositório, sem publicar detalhes exploráveis em uma issue pública.
 
 ## Licença
 
-MIT — veja [LICENSE](LICENSE).
+Compsognathus é software de código aberto sob a licença [MIT](LICENSE).

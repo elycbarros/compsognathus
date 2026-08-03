@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import logging
 import re
-from contextlib import closing
 from html import escape
 from pathlib import Path
 from typing import Optional
@@ -23,6 +22,8 @@ from rich.console import Console
 from rich.logging import RichHandler
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 from rich.table import Table
+
+from compsognathus.datasets import load_dataframe, quality_bool_series
 
 app = typer.Typer(
     name="comps",
@@ -168,10 +169,7 @@ def scrape(
         console=console,
     ) as progress:
         task = progress.add_task("Raspando...", total=len(urls))
-        status_msgs: list[str] = []
-
         def _on_progress(current: int, total: int, msg: str) -> None:
-            status_msgs.append(msg)
             progress.update(task, completed=current, description=msg[:60])
 
         df = _scrape(
@@ -195,35 +193,6 @@ def scrape(
 
 # ── Comando: validate ─────────────────────────────────────────────────────────
 
-def _load_dataframe(file: Path):
-    """Carrega um dataset suportado pela CLI."""
-    import pandas as pd
-    import sqlite3
-
-    if not file.exists():
-        raise FileNotFoundError(f"Arquivo não encontrado: {file}")
-    if file.suffix in (".parquet", ".pq"):
-        return pd.read_parquet(file)
-    if file.suffix == ".csv":
-        return pd.read_csv(file)
-    if file.suffix in (".json", ".jsonl"):
-        return pd.read_json(file, lines=file.suffix == ".jsonl")
-    if file.suffix in (".db", ".sqlite", ".sqlite3"):
-        with closing(sqlite3.connect(file)) as conn:
-            return pd.read_sql_query("SELECT * FROM scraped_data", conn)
-    return pd.read_parquet(file)
-
-
-def _quality_bool_series(df, column: str, default: bool):
-    import pandas as pd
-
-    if column not in df.columns:
-        return pd.Series(default, index=df.index, dtype=bool)
-    values = df[column]
-    if values.dtype == bool:
-        return values.fillna(False)
-    return values.astype(str).str.strip().str.lower().isin({"true", "1", "yes", "sim"})
-
 
 @app.command()
 def validate(
@@ -234,13 +203,13 @@ def validate(
     from collections import Counter
 
     try:
-        df = _load_dataframe(file)
+        df = load_dataframe(file)
     except Exception as exc:
         console.print(f"[red]❌ Erro ao ler o arquivo: {exc}[/red]")
         raise typer.Exit(1)
 
-    parse_ok = _quality_bool_series(df, "parse_ok", True)
-    download_ok = _quality_bool_series(df, "download_ok", True)
+    parse_ok = quality_bool_series(df, "parse_ok", True)
+    download_ok = quality_bool_series(df, "download_ok", True)
     parse_failures = int((~parse_ok).sum())
     download_failures = int((~download_ok).sum())
 
@@ -291,26 +260,8 @@ def report(
         comps report dados.parquet
         comps report dados.parquet --html relatorio.html
     """
-    import pandas as pd
-    import sqlite3
-
-    if not file.exists():
-        console.print(f"[red]❌ Arquivo não encontrado: {file}[/red]")
-        raise typer.Exit(1)
-
     try:
-        if file.suffix in (".parquet", ".pq"):
-            df = pd.read_parquet(file)
-        elif file.suffix == ".csv":
-            df = pd.read_csv(file)
-        elif file.suffix in (".json", ".jsonl"):
-            df = pd.read_json(file, lines=file.suffix == ".jsonl")
-        elif file.suffix in (".db", ".sqlite", ".sqlite3"):
-            with closing(sqlite3.connect(file)) as conn:
-                df = pd.read_sql_query("SELECT * FROM scraped_data", conn)
-        else:
-            # Tenta parquet primeiro por padrão
-            df = pd.read_parquet(file)
+        df = load_dataframe(file)
     except Exception as exc:
         console.print(f"[red]❌ Erro ao ler o arquivo: {exc}[/red]")
         raise typer.Exit(1)
@@ -424,40 +375,55 @@ def plugins_new(
 Plugin: {clean_domain}
 Domínio: Personalizado
 Extrai: titulo, preco, descricao
+
+Comece ajustando os seletores CSS e mantenha o teste de fixture atualizado.
 """
+import re
+
 from bs4 import BeautifulSoup
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
 
 
+def _text(element) -> str | None:
+    """Retorna texto limpo, ou None quando o seletor não encontrou nada."""
+    if element is None:
+        return None
+    value = element.get_text(strip=True)
+    return value or None
+
+
+def _price(text: str | None) -> float | None:
+    """Converte 'R$ 1.234,56' para 1234.56 sem esconder erros."""
+    if not text:
+        return None
+    match = re.search(r"\\d[\\d.]*(?:,\\d{{1,2}})?", text)
+    if not match:
+        return None
+    number = match.group(0)
+    normalized = number.replace(".", "").replace(",", ".") if "," in number else number
+    try:
+        return float(normalized)
+    except ValueError:
+        return None
+
+
 @register("{clean_domain}", schema=["titulo", "preco", "descricao"])
 def parse(html: str, url: str) -> ScrapedRecord:
-    """Parser para {clean_domain}."""
+    """Extrai dados de {clean_domain}; adapte os seletores ao HTML real."""
     soup = BeautifulSoup(html, "html.parser")
     errors: list[str] = []
 
-    # Título
-    h1 = soup.find("h1")
-    titulo = h1.get_text(strip=True) if h1 else None
+    # 1. Extraia um campo usando um seletor e trate sua ausência explicitamente.
+    titulo = _text(soup.find("h1"))
     if not titulo:
         errors.append("titulo")
 
-    # Preço
-    preco_el = soup.select_one(".price")
-    preco = None
-    if preco_el:
-        try:
-            import re
-            m = re.search(r"[\\d.]+", preco_el.get_text())
-            preco = float(m.group(0)) if m else None
-        except Exception:
-            pass
+    preco = _price(_text(soup.select_one(".price")))
     if preco is None:
         errors.append("preco")
 
-    # Descrição
-    desc_el = soup.select_one(".description")
-    descricao = desc_el.get_text(strip=True) if desc_el else None
+    descricao = _text(soup.select_one(".description"))
 
     return ScrapedRecord(
         url=url,
@@ -509,6 +475,7 @@ def test_{mod_name}_fixture():
     html = fixture.read_text(encoding="utf-8")
     record = parse(html, "https://{clean_domain}/item/1")
     assert record.fields["titulo"]
+    assert record.fields["preco"] == 99.90
 '''
     if not test_file.exists():
         test_file.parent.mkdir(parents=True, exist_ok=True)

@@ -1,7 +1,6 @@
 """
 Testes de integração da interface CLI (typer + rich).
 """
-from pathlib import Path
 from typer.testing import CliRunner
 from compsognathus.cli import app
 
@@ -44,7 +43,9 @@ def test_cli_plugins_new(tmp_path, monkeypatch):
 
     assert plugin_py.exists()
     assert fixture_html.exists()
-    assert "testsite.com.br" in plugin_py.read_text(encoding="utf-8")
+    generated_plugin = plugin_py.read_text(encoding="utf-8")
+    assert "testsite.com.br" in generated_plugin
+    compile(generated_plugin, str(plugin_py), "exec")
     assert "testsite" in (tmp_path / "compsognathus" / "plugins" / "__init__.py").read_text(encoding="utf-8")
     assert (tmp_path / "tests" / "test_testsite.py").exists()
 

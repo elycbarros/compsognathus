@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="500" viewBox="0 0 960 500" role="img" aria-labelledby="title description">
+  <title id="title">Demonstração da CLI Compsognathus</title>
+  <desc id="description">Terminal exibindo dry-run, scraping e validação de oito registros.</desc>
+  <rect width="960" height="500" rx="16" fill="#0f172a"/>
+  <rect width="960" height="48" rx="16" fill="#1e293b"/>
+  <rect y="32" width="960" height="16" fill="#1e293b"/>
+  <circle cx="26" cy="24" r="7" fill="#fb7185"/>
+  <circle cx="50" cy="24" r="7" fill="#fbbf24"/>
+  <circle cx="74" cy="24" r="7" fill="#4ade80"/>
+  <text x="480" y="29" text-anchor="middle" fill="#94a3b8" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">compsognathus — terminal</text>
+
+  <g font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17">
+    <text x="28" y="84" fill="#4ade80">$</text>
+    <text x="50" y="84" fill="#f8fafc">comps scrape links.txt --dry-run</text>
+    <text x="28" y="120" fill="#38bdf8">🦕  DRY RUN — Validação de URLs</text>
+    <text x="28" y="150" fill="#cbd5e1">8/8 URLs possuem plugins compatíveis</text>
+
+    <text x="28" y="202" fill="#4ade80">$</text>
+    <text x="50" y="202" fill="#f8fafc">comps scrape links.txt --output dados.csv</text>
+    <text x="28" y="238" fill="#4ade80">✓ Concluído! 8/8 registros com sucesso</text>
+    <text x="28" y="268" fill="#94a3b8">Exportado para: dados.csv</text>
+
+    <text x="28" y="320" fill="#4ade80">$</text>
+    <text x="50" y="320" fill="#f8fafc">comps validate dados.csv --fail-on-error</text>
+    <text x="28" y="356" fill="#38bdf8">Validação do dataset</text>
+    <text x="48" y="388" fill="#cbd5e1">Total de registros</text>
+    <text x="310" y="388" fill="#f8fafc">8</text>
+    <text x="48" y="416" fill="#cbd5e1">Downloads com falha</text>
+    <text x="310" y="416" fill="#f8fafc">0</text>
+    <text x="48" y="444" fill="#cbd5e1">Parses com falha</text>
+    <text x="310" y="444" fill="#f8fafc">0</text>
+    <text x="28" y="478" fill="#4ade80">✓ Dataset íntegro</text>
+  </g>
+</svg>

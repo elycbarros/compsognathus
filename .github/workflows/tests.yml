@@ -1,4 +1,4 @@
-# Continuous Integration — roda pytest a cada push e pull request
+# Continuous Integration — lint e testes a cada push e pull request
 
 name: Tests
 
@@ -9,13 +9,33 @@ on:
     branches: [main]
 
 jobs:
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Run lint
+        run: ruff check .
+
   test:
     name: pytest (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
 
     strategy:
+      fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - name: Checkout
@@ -38,7 +58,7 @@ jobs:
         run: pip install -e ".[dev]"
 
       - name: Run tests with coverage
-        run: pytest tests/ -v --tb=short --cov=compsognathus --cov-report=term-missing --cov-report=xml
+        run: pytest tests/ -v --tb=short --cov=compsognathus --cov-report=term-missing --cov-report=xml --cov-fail-under=75
 
       - name: Upload coverage artifact
         uses: actions/upload-artifact@v4
