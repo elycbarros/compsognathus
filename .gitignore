@@ -25,6 +25,11 @@ build/
 *.log
 compsognathus.log
 
+# Coverage
+.coverage
+coverage.xml
+htmlcov/
+
 # macOS
 .DS_Store
 
