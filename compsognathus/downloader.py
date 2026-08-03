@@ -1,20 +1,16 @@
 """
-Downloader de páginas web com duas camadas de resiliência:
+Downloader de páginas web com duas camadas de resiliência e suporte a concorrência:
     1. Playwright (Chromium headless + flags stealth) — executa JavaScript
     2. httpx (fallback HTTP/1.1 ou HTTP/2) — mais rápido, sem JS
 
 Fluxo para cada URL:
     download_url(url) → tenta Playwright → se falhar → tenta httpx → DownloadResult
 
-Por que duas camadas?
-    Muitos sites modernos (como portais imobiliários) exigem JavaScript para
-    renderizar o conteúdo real. Playwright garante a renderização completa.
-    httpx serve como fallback eficiente para sites mais simples.
-
 Proteção anti-bloqueio:
-    - Delay aleatório de 1–2s entre requisições (evita rate-limiting)
+    - Delay aleatório entre requisições
     - Validação do HTML recebido (rejeita páginas de erro de WAF/Cloudflare)
     - Retry com backoff exponencial via tenacity
+    - Execução concorrente via ThreadPoolExecutor
 """
 from __future__ import annotations
 
@@ -22,6 +18,7 @@ import hashlib
 import logging
 import random
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -36,7 +33,6 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
-# User-Agent de navegador real para evitar bloqueios simples por header
 _USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -68,15 +64,10 @@ def _url_to_filename(url: str) -> str:
 
 
 def _is_valid_html(html: str) -> bool:
-    """Valida se o HTML recebido contém conteúdo real (não é erro de WAF).
-
-    Rejeita páginas de bloqueio (Cloudflare 403, Access Denied) e
-    arquivos muito pequenos que indicam resposta vazia.
-    """
+    """Valida se o HTML recebido contém conteúdo real (não é erro de WAF)."""
     if not html or len(html) < 8_000:
         return False
 
-    # Verifica markers de bloqueio no início do HTML
     header_sample = html[:3_000].lower()
     block_markers = [
         "access denied",
@@ -94,7 +85,7 @@ def _is_valid_html(html: str) -> bool:
 
 @retry(
     retry=retry_if_exception_type(Exception),
-    stop=stop_after_attempt(1),     # 1 tentativa — Playwright é lento; httpx retenta
+    stop=stop_after_attempt(1),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
@@ -108,7 +99,7 @@ def _try_playwright(url: str) -> str:
         browser = p.chromium.launch(
             headless=True,
             args=[
-                "--disable-blink-features=AutomationControlled",  # flag stealth principal
+                "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-infobars",
@@ -125,7 +116,6 @@ def _try_playwright(url: str) -> str:
             page.set_default_navigation_timeout(15_000)
             page.goto(url, timeout=15_000, wait_until="domcontentloaded")
 
-            # Aguarda scripts assíncronos terminarem de carregar
             page.wait_for_timeout(1_500)
             html = page.content()
 
@@ -141,12 +131,12 @@ def _try_playwright(url: str) -> str:
             browser.close()
 
 
-# ── Camada 2: httpx (fallback, com retry e backoff) ──────────────────────────
+# ── Camada 2: httpx (fallback) ───────────────────────────────────────────────
 
 @retry(
     retry=retry_if_exception_type(Exception),
     stop=stop_after_attempt(3),
-    wait=wait_exponential(multiplier=1, min=2, max=30),  # espera 2s, 4s, 8s...
+    wait=wait_exponential(multiplier=1, min=2, max=30),
     before_sleep=before_sleep_log(logger, logging.WARNING),
     reraise=True,
 )
@@ -159,7 +149,6 @@ def _try_httpx(url: str) -> str:
 
     html = None
     try:
-        # HTTP/2 é mais eficiente mas nem sempre suportado
         with httpx.Client(headers=_HTTPX_HEADERS, timeout=timeout, follow_redirects=True, http2=True) as client:
             response = client.get(url)
             response.raise_for_status()
@@ -178,18 +167,13 @@ def _try_httpx(url: str) -> str:
     return html
 
 
-# ── Orquestrador ──────────────────────────────────────────────────────────────
+# ── Orquestrador de Download ──────────────────────────────────────────────────
 
 def download_url(url: str, output_dir: Path) -> DownloadResult:
-    """Baixa uma URL, salva o HTML no disco e retorna o resultado.
-
-    Tenta Playwright primeiro (com suporte a JS). Se falhar,
-    usa httpx como fallback. Se ambos falharem, retorna ok=False.
-    """
+    """Baixa uma URL, salva o HTML no disco e retorna o resultado."""
     output_dir.mkdir(parents=True, exist_ok=True)
     filepath = output_dir / _url_to_filename(url)
 
-    # Tenta Playwright (JavaScript completo + stealth)
     try:
         html = _try_playwright(url)
         filepath.write_text(html, encoding="utf-8")
@@ -199,7 +183,6 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
     except Exception as pw_err:
         logger.warning("Playwright falhou: %s — %s", url, pw_err)
 
-    # Tenta httpx (sem JavaScript, mas mais rápido)
     try:
         html = _try_httpx(url)
         filepath.write_text(html, encoding="utf-8")
@@ -217,32 +200,56 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
 def download_all(
     urls: list[str],
     output_dir: Path,
+    concurrency: int = 1,
     progress_callback: Callable[[int, int, DownloadResult], None] | None = None,
 ) -> list[DownloadResult]:
-    """Baixa todas as URLs sequencialmente com delay anti-rate-limit.
+    """Baixa todas as URLs com suporte a execução concorrente.
 
     Args:
         urls:              Lista de URLs para baixar.
         output_dir:        Diretório onde os HTMLs serão salvos.
+        concurrency:       Número de threads simultâneas para download (default=1).
         progress_callback: Função chamada após cada download (atual, total, resultado).
     """
-    results: list[DownloadResult] = []
     total = len(urls)
-    logger.info("Iniciando download de %d URL(s) → %s", total, output_dir)
+    logger.info("Iniciando download de %d URL(s) → %s (threads=%d)", total, output_dir, concurrency)
 
-    for i, url in enumerate(urls):
-        if i > 0:
-            # why: delay aleatório entre requests evita bloqueio por rate-limit
-            delay = random.uniform(1.0, 2.0)
-            logger.debug("Aguardando %.1fs antes do próximo download...", delay)
-            time.sleep(delay)
+    if concurrency <= 1 or total <= 1:
+        # Execução sequencial
+        results: list[DownloadResult] = []
+        for i, url in enumerate(urls):
+            if i > 0:
+                time.sleep(random.uniform(1.0, 2.0))
+            res = download_url(url, output_dir)
+            results.append(res)
+            if progress_callback:
+                progress_callback(i + 1, total, res)
+        return results
 
-        result = download_url(url, output_dir)
-        results.append(result)
+    # Execução concorrente via ThreadPoolExecutor
+    results_map: dict[str, DownloadResult] = {}
+    completed_count = 0
 
-        if progress_callback:
-            progress_callback(i + 1, total, result)
+    def _worker(url_item: str) -> DownloadResult:
+        # Pequeno jitter para evitar rajada idêntica no mesmo milissegundo
+        time.sleep(random.uniform(0.1, 0.5))
+        return download_url(url_item, output_dir)
 
-    ok_count = sum(1 for r in results if r.ok)
-    logger.info("Download concluído: %d/%d com sucesso", ok_count, total)
-    return results
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        future_to_url = {executor.submit(_worker, url): url for url in urls}
+
+        for future in as_completed(future_to_url):
+            url = future_to_url[future]
+            try:
+                res = future.result()
+            except Exception as exc:
+                res = DownloadResult(url=url, filepath=None, method="error", ok=False, error=str(exc))
+
+            results_map[url] = res
+            completed_count += 1
+
+            if progress_callback:
+                progress_callback(completed_count, total, res)
+
+    # Garante a ordem original das URLs na lista final
+    return [results_map[url] for url in urls if url in results_map]

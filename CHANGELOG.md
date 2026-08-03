@@ -5,6 +5,17 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+## [1.2.0] — 2026-08-03
+
+### Adicionado
+- **Exportação Multi-Formato**: Suporte completo para exportar em JSON, JSONL (`.jsonl` / `.ndjson`) e SQLite (`.db` / `.sqlite`) além de Parquet e CSV.
+- **Scaffolding de Plugins (`comps plugins new <dominio>`)**: Comando CLI interativo que gera automaticamente o código do plugin, fixture sintética e testes unitários.
+- **Downloads Concorrentes (`--concurrency N` / `-c N`)**: Suporte a downloads simultâneos em paralelo via ThreadPoolExecutor para alta performance em grandes listas de URLs.
+- **Relatório HTML Visual (`comps report <arquivo> --html relatorio.html`)**: Exporte relatórios visuais responsivos em página única HTML com métricas e prévia dos dados.
+- **Relatórios de Cobertura no CI**: Configurado upload de artefatos XML de cobertura de código no GitHub Actions.
+
+---
+
 ## [1.1.0] — 2026-08-03
 
 ### Adicionado

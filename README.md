@@ -80,22 +80,38 @@ echo "https://www.zapimoveis.com.br/imovel/..." > links.txt
 # Valide as URLs e os plugins disponíveis sem realizar downloads (Dry-Run)
 comps scrape links.txt --dry-run
 
-# Raspe e exporte
+# Raspe e exporte em Parquet (padrão)
 comps scrape links.txt --output dados.parquet
-comps scrape links.txt --output dados.csv --format csv
+
+# Raspe em paralelo (3 threads simultâneas) e exporte em SQLite / JSON / JSONL
+comps scrape links.txt --format sqlite --output banco.db --concurrency 3
+comps scrape links.txt --format jsonl --output dados.jsonl
 ```
 
-### Scraping de URL única
+### Relatório de qualidade (Console & HTML)
 
 ```bash
-comps scrape "https://www.mercadolivre.com.br/p/MLB..." --output produto.parquet
-```
-
-### Relatório de qualidade
-
-```bash
+# Relatório rápido no terminal
 comps report dados.parquet
+
+# Gerar relatório visual interativo em HTML
+comps report dados.parquet --html relatorio.html
 ```
+
+---
+
+## Adicionando um novo plugin
+
+### Opção 1: Gerador Automático (Scaffolding em 1 comando)
+
+```bash
+comps plugins new olx.com.br
+```
+Este comando gera automaticamente o código inicial do plugin em `compsognathus/plugins/olx.py` e a fixture em `tests/fixtures/olx_sample.html`!
+
+### Opção 2: Manual
+
+Crie um novo parser em **20 linhas**. Veja o template comentado em [`plugins/example_generic.py`](compsognathus/plugins/example_generic.py) e o tutorial completo em [`docs/writing-a-plugin.md`](docs/writing-a-plugin.md).
 
 Saída:
 ```
