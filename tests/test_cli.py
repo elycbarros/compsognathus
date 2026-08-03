@@ -93,6 +93,25 @@ def test_cli_infere_formato_pela_extensao(tmp_path, monkeypatch):
     assert seen["fmt"] == "csv"
 
 
+def test_cli_validate_dataset_com_falhas(tmp_path):
+    import pandas as pd
+
+    data = tmp_path / "dados.csv"
+    pd.DataFrame(
+        [
+            {"parse_ok": True, "download_ok": True, "parse_errors": ""},
+            {"parse_ok": False, "download_ok": False, "parse_errors": "download: timeout"},
+        ]
+    ).to_csv(data, index=False)
+
+    result = runner.invoke(app, ["validate", str(data)])
+    strict_result = runner.invoke(app, ["validate", str(data), "--fail-on-error"])
+    assert result.exit_code == 0
+    assert strict_result.exit_code == 1
+    assert "Downloads com falha" in result.output
+    assert "download: timeout" in result.output
+
+
 def test_cli_report_html_export(tmp_path):
     # Cria arquivo parquet temporário
     import pandas as pd

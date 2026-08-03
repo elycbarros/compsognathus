@@ -94,6 +94,10 @@ comps scrape links.txt --format jsonl --output dados.jsonl
 # Relatório rápido no terminal
 comps report dados.parquet
 
+# Validar qualidade e listar falhas do dataset
+comps validate dados.parquet
+comps validate dados.parquet --fail-on-error
+
 # Gerar relatório visual interativo em HTML
 comps report dados.parquet --html relatorio.html
 ```

@@ -4,6 +4,7 @@ Interface de linha de comando (CLI) do Compsognathus.
 Comandos disponíveis:
     comps scrape        — baixa URLs e exporta dados (Parquet, CSV, JSON, JSONL, SQLite)
     comps report        — exibe estatísticas e gera relatório HTML visual
+    comps validate      — diagnostica qualidade e falhas de um dataset
     comps plugins list  — lista plugins registrados e seus schemas
     comps plugins new   — gera boilerplate para um novo plugin
 """
@@ -190,6 +191,91 @@ def scrape(
     console.print(f"[dim]Exportado para: {output} (formato: {fmt})[/dim]\n")
 
     _print_preview(df, max_rows=5)
+
+
+# ── Comando: validate ─────────────────────────────────────────────────────────
+
+def _load_dataframe(file: Path):
+    """Carrega um dataset suportado pela CLI."""
+    import pandas as pd
+    import sqlite3
+
+    if not file.exists():
+        raise FileNotFoundError(f"Arquivo não encontrado: {file}")
+    if file.suffix in (".parquet", ".pq"):
+        return pd.read_parquet(file)
+    if file.suffix == ".csv":
+        return pd.read_csv(file)
+    if file.suffix in (".json", ".jsonl"):
+        return pd.read_json(file, lines=file.suffix == ".jsonl")
+    if file.suffix in (".db", ".sqlite", ".sqlite3"):
+        with closing(sqlite3.connect(file)) as conn:
+            return pd.read_sql_query("SELECT * FROM scraped_data", conn)
+    return pd.read_parquet(file)
+
+
+def _quality_bool_series(df, column: str, default: bool):
+    import pandas as pd
+
+    if column not in df.columns:
+        return pd.Series(default, index=df.index, dtype=bool)
+    values = df[column]
+    if values.dtype == bool:
+        return values.fillna(False)
+    return values.astype(str).str.strip().str.lower().isin({"true", "1", "yes", "sim"})
+
+
+@app.command()
+def validate(
+    file: Path = typer.Argument(..., help="Arquivo de dados a validar."),
+    fail_on_error: bool = typer.Option(False, "--fail-on-error", help="Sai com código 1 se houver falhas."),
+) -> None:
+    """Diagnostica downloads, parsing e erros registrados no dataset."""
+    from collections import Counter
+
+    try:
+        df = _load_dataframe(file)
+    except Exception as exc:
+        console.print(f"[red]❌ Erro ao ler o arquivo: {exc}[/red]")
+        raise typer.Exit(1)
+
+    parse_ok = _quality_bool_series(df, "parse_ok", True)
+    download_ok = _quality_bool_series(df, "download_ok", True)
+    parse_failures = int((~parse_ok).sum())
+    download_failures = int((~download_ok).sum())
+
+    errors = Counter()
+    if "parse_errors" in df.columns:
+        for value in df["parse_errors"].dropna():
+            errors.update(item.strip() for item in str(value).split(",") if item.strip())
+
+    console.print()
+    console.print(f"[bold cyan]🔎 Validação:[/bold cyan] {file.name}")
+    console.print()
+    table = Table(show_header=False, box=None, padding=(0, 2))
+    table.add_row("Total de registros", str(len(df)))
+    table.add_row("Downloads com falha", str(download_failures))
+    table.add_row("Parses com falha", str(parse_failures))
+    table.add_row("Registros completos", f"{int(parse_ok.sum())}/{len(df)}")
+    console.print(table)
+
+    if errors:
+        console.print()
+        console.print("[bold]Principais erros:[/bold]")
+        error_table = Table()
+        error_table.add_column("Erro")
+        error_table.add_column("Ocorrências", justify="right")
+        for error, count in errors.most_common(10):
+            error_table.add_row(error, str(count))
+        console.print(error_table)
+
+    has_errors = download_failures > 0 or parse_failures > 0
+    status = "[red]❌ Dataset contém falhas[/red]" if has_errors else "[green]✅ Dataset íntegro[/green]"
+    console.print()
+    console.print(status)
+    console.print()
+    if has_errors and fail_on_error:
+        raise typer.Exit(1)
 
 
 # ── Comando: report ───────────────────────────────────────────────────────────

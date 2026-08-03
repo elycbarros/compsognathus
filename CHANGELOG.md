@@ -5,6 +5,16 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+## [1.3.1] — 2026-08-03
+
+### Corrigido
+- Parsers imobiliários compatíveis com os payloads atuais `self.__next_f.push` do VivaReal e ZAP.
+
+### Adicionado
+- Comando `comps validate` para diagnosticar falhas de download, parsing e campos ausentes.
+
+---
+
 ## [1.3.0] — 2026-08-03
 
 ### Melhorado
@@ -63,6 +73,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+[1.3.1]: https://github.com/elycbarros/compsognathus/releases/tag/v1.3.1
 [1.3.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.3.0
 [1.2.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.2.0
 [1.1.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.1.0
