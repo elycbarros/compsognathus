@@ -80,17 +80,53 @@ def scrape(
     output: Path = typer.Option(Path("output.parquet"), "--output", "-o", help="Arquivo de saída (.parquet ou .csv)."),
     fmt: str = typer.Option("parquet", "--format", "-f", help="Formato: 'parquet' ou 'csv'."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Exibe logs detalhados."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Valida URLs e plugins disponíveis sem realizar downloads."),
 ) -> None:
     """Raspa URLs e exporta dados estruturados em .parquet ou .csv.
 
     Exemplos:
         comps scrape links.txt --output dados.parquet
         comps scrape https://www.zapimoveis.com.br/imovel/... -o single.csv -f csv
+        comps scrape links.txt --dry-run
     """
     _setup_logging(verbose)
+    from urllib.parse import urlparse
+    from compsognathus.core.registry import get_parser
     from compsognathus.scraper import scrape as _scrape
 
+    # Garante que plugins estejam auto-registrados
+    import compsognathus.plugins  # noqa: F401
+
     urls = _read_urls(source)
+
+    if dry_run:
+        console.print(f"\n[bold yellow]🔍 DRY RUN — Validação de URLs ({len(urls)} URLs)[/bold yellow]\n")
+        table = Table(title="Simulação de Scraping", show_lines=True)
+        table.add_column("URL", style="cyan", max_width=40, no_wrap=True)
+        table.add_column("Domínio", style="dim")
+        table.add_column("Status Plugin", style="bold")
+        table.add_column("Módulo", style="green")
+
+        valid_count = 0
+        for url in urls:
+            domain = urlparse(url).netloc.lower()
+            try:
+                fn = get_parser(url)
+                status = "[green]✅ Disponível[/green]"
+                module = fn.__module__.split(".")[-1]
+                valid_count += 1
+            except ValueError:
+                status = "[red]❌ Não suportado[/red]"
+                module = "–"
+
+            table.add_row(url, domain, status, module)
+
+        console.print(table)
+        console.print(
+            f"\n[dim]Resumo do Dry-Run: {valid_count}/{len(urls)} URL(s) possuem plugins compatíveis.[/dim]\n"
+        )
+        return
+
     console.print(f"\n[bold cyan]🦕 Compsognathus[/bold cyan] — {len(urls)} URL(s) para raspar\n")
 
     # Barra de progresso visual (rich) com spinner, barra e tempo decorrido

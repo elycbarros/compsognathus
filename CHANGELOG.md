@@ -5,6 +5,15 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
+## [1.1.0] — 2026-08-03
+
+### Adicionado
+- **Plugin demo `books.toscrape.com`**: Plugin funcional para o site sandbox didático open-to-scrape (extrai título, preço, avaliação, disponibilidade, UPC e categoria).
+- **CLI `--dry-run`**: O comando `comps scrape --dry-run` permite validar a lista de URLs e checar quais plugins compatíveis estão registrados antes de realizar downloads.
+- **Suíte de testes estendida**: 40 testes unitários e de integração cobrindo os 5 plugins e opções da CLI.
+
+---
+
 ## [1.0.0] — 2026-08-03
 
 ### Adicionado
@@ -27,14 +36,5 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ---
 
-## [Não lançado] — v1.1.0 (próximos passos)
-
-### Planejado
-- Plugin `books.toscrape.com` — demo open-to-scrape sem WAF (mostrado no tutorial)
-- GitHub Actions badge funcional no README
-- `comps scrape --dry-run` — valida URLs e plugins disponíveis sem baixar nada
-- `pytest-cov` no workflow CI com relatório de cobertura
-
----
-
+[1.1.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.1.0
 [1.0.0]: https://github.com/elycbarros/compsognathus/releases/tag/v1.0.0

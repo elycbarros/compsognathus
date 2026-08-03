@@ -180,3 +180,40 @@ class TestCathoParser:
         assert "cargo" in rec.fields
         assert "preco" not in rec.fields     # não é produto
         assert "quartos" not in rec.fields   # não é imóvel
+
+
+# ── Books to Scrape (Livros / E-commerce Sandbox) ────────────────────────────
+
+class TestBooksToScrapeParser:
+    URL = "http://books.toscrape.com/catalogue/a-light-in-the-attic_1000/index.html"
+
+    def test_extrai_titulo(self, load_fixture):
+        from compsognathus.plugins.books_toscrape import parse
+        html = load_fixture("books_toscrape_sample.html")
+        rec = parse(html, self.URL)
+        assert rec.fields["titulo"] == "A Light in the Attic"
+
+    def test_extrai_preco(self, load_fixture):
+        from compsognathus.plugins.books_toscrape import parse
+        html = load_fixture("books_toscrape_sample.html")
+        rec = parse(html, self.URL)
+        assert rec.fields["preco"] == 51.77
+
+    def test_extrai_avaliacao(self, load_fixture):
+        from compsognathus.plugins.books_toscrape import parse
+        html = load_fixture("books_toscrape_sample.html")
+        rec = parse(html, self.URL)
+        assert rec.fields["avaliacao"] == 3.0
+
+    def test_extrai_upc_e_categoria(self, load_fixture):
+        from compsognathus.plugins.books_toscrape import parse
+        html = load_fixture("books_toscrape_sample.html")
+        rec = parse(html, self.URL)
+        assert rec.fields["upc"] == "a897639ed1542c26"
+        assert rec.fields["categoria"] == "Poetry"
+
+    def test_parse_ok_true(self, load_fixture):
+        from compsognathus.plugins.books_toscrape import parse
+        html = load_fixture("books_toscrape_sample.html")
+        rec = parse(html, self.URL)
+        assert rec.parse_ok is True

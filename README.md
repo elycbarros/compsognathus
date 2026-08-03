@@ -12,7 +12,7 @@
 
 Compsognathus é um framework de scraping orientado a **plugins**. Você registra um plugin para um domínio (com ~20 linhas de Python) e a CLI cuida do resto: download com Playwright, retry automático, exportação em Parquet/CSV e relatório de qualidade.
 
-**Plugins bundled — 3 domínios distintos:**
+**Plugins bundled — 4 domínios/segmentos distintos:**
 
 | Plugin | Site | Campos extraídos |
 |---|---|---|
@@ -20,6 +20,7 @@ Compsognathus é um framework de scraping orientado a **plugins**. Você registr
 | `vivareal` | vivareal.com.br | preço, área, quartos, bairro, endereço |
 | `mercadolivre` | mercadolivre.com.br | produto, preço, avaliação, vendedor, condição |
 | `catho` | catho.com.br | cargo, empresa, salário, cidade, regime |
+| `books_toscrape` | books.toscrape.com | título, preço, avaliação, disponibilidade, UPC |
 
 ---
 
@@ -75,6 +76,9 @@ playwright install chromium
 ```bash
 # Crie um arquivo com as URLs (uma por linha)
 echo "https://www.zapimoveis.com.br/imovel/..." > links.txt
+
+# Valide as URLs e os plugins disponíveis sem realizar downloads (Dry-Run)
+comps scrape links.txt --dry-run
 
 # Raspe e exporte
 comps scrape links.txt --output dados.parquet
