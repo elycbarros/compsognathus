@@ -7,12 +7,13 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ## [Em desenvolvimento]
 
+### Documentação
+- Documentação inteiramente revisada para centralizar o `README.md` como entrada rápida executiva, transferindo a carga didática integralmente para `DIDATICO.md` e a carga arquitetural profunda para `O_QUE_SOU.md`.
+- Esclarecimento na hierarquia do downloader corrigido nos diagramas para afirmar que `Playwright` é a primeira camada, servindo `httpx` como fallback resiliente.
+- Métricas e números absolutos convertidos para formato dinâmico, evitando rápida desatualização de indicadores da suíte de testes.
+
 ### Melhorado
-- Documentação e scaffolding agora distinguem o exemplo mínimo do template robusto e tratam campos HTML ausentes de forma explícita.
-- README reorganizado em torno de início rápido, capacidades, qualidade, contribuição e uso responsável.
-- README agora apresenta demonstração visual, validação real anonimizada e decisões técnicas com seus trade-offs.
 - CI ampliado com Ruff e matriz de testes do Python 3.11 ao 3.14.
-- Suíte ampliada para 81 testes; cobertura total chegou a 80% e o downloader a 90%.
 - Leitura de datasets foi centralizada para manter `comps report` e `comps validate` consistentes.
 - Registro de plugins passou a usar um contrato nomeado, mais fácil de compreender e tipar.
 - Fixtures HTML foram centralizadas em `tests/conftest.py`.
@@ -38,7 +39,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - **Extração estruturada**: suporte compartilhado a JSON-LD com `@graph`.
 
 ### Testes
-- Suíte ampliada para 68 testes, cobrindo falhas de rede, schema, CLI, JSON-LD e pipeline.
+- Suíte ampliada cobrindo falhas de rede, schema, CLI, JSON-LD e pipeline.
 
 ---
 
@@ -61,7 +62,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 ### Adicionado
 - **Plugin demo `books.toscrape.com`**: Plugin funcional para o site sandbox didático open-to-scrape (extrai título, preço, avaliação, disponibilidade, UPC e categoria).
 - **CLI `--dry-run`**: O comando `comps scrape --dry-run` permite validar a lista de URLs e checar quais plugins compatíveis estão registrados antes de realizar downloads.
-- **Suíte de testes estendida**: 40 testes unitários e de integração cobrindo os 5 plugins e opções da CLI.
+- **Suíte de testes estendida**: testes unitários e de integração cobrindo os plugins e opções da CLI.
 
 ---
 
@@ -82,7 +83,7 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
   - `comps report` — estatísticas e prévia do dataset
   - `comps plugins list` — tabela de plugins registrados com schemas
 - **Export**: `.parquet` (padrão, via pandas + pyarrow) e `.csv`
-- **Testes**: 32 testes com fixtures HTML sintéticas (nenhum acesso à internet necessário)
+- **Testes**: Suíte de testes offline com fixtures HTML sintéticas.
 - **Documentação**: README de portfólio com diagrama de arquitetura + `docs/writing-a-plugin.md`
 
 ---

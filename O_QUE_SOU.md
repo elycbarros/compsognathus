@@ -3,177 +3,88 @@
 ![Versão 1.3.1](https://img.shields.io/badge/vers%C3%A3o-1.3.1-blue.svg)
 [![Tests](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml/badge.svg)](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml)
 
-> **Compsognathus** (ou simplesmente **`comps`**) v1.3.1 é um framework e CLI de web scraping em Python orientado a plugins.
+> **Compsognathus** (ou simplesmente **`comps`**) v1.3.1 é um framework e CLI Python para coleta estruturada e auditável de dados web, orientado a plugins.
 > 
-> Ele cuida da infraestrutura complexa e repetitiva da raspagem de dados — downloads HTTP/headless, gestão de taxas e retentativas, validação de esquema, auditoria de qualidade e exportação — para que você foque apenas na lógica de extração da página alvo.
+> Ele cuida da infraestrutura complexa e repetitiva da raspagem de dados — downloads com navegadores headless, fallbacks resilientes HTTP, gestão de taxas e retentativas, validação de esquema via contratos fortes, auditoria de falhas e exportação analítica — para que você foque apenas na lógica de extração da página alvo.
 
 ---
 
-## 🎯 O Propósito do Projeto
+## 🎯 A Filosofia e o Problema
 
-Na raspagem de dados para análise de mercado ou ciência de dados, criar scripts avulsos cria rapidamente um pesadelo de manutenção: retentativas ad-hoc, concorrência descontrolada, formatos de saída inconsistentes e código repetido.
+Na raspagem de dados para ciência de dados e análises corporativas, a criação de scripts avulsos cria rapidamente um pesadelo de manutenção: fluxos sem retentativas confiáveis, concorrência descontrolada que aciona banimentos, formatos de saída inconsistentes e exceções silenciosas que estragam datasets gigantescos.
 
-O **Compsognathus** resolve isso através de **separação clara de responsabilidades**:
-- **O Framework (`comps`)** lida com a infraestrutura: rede, resiliência, validação, relatórios e exportação.
-- **Os Plugins** contêm apenas a regra de parsing específica de cada site ou domínio.
+O **Compsognathus** se propõe a ser uma base de engenharia de dados, resolvendo essa bagunça através da **separação estrita de responsabilidades**:
 
-Inspirado no pequeno dinossauro ágil e veloz, o `comps` é leve, extensível e projetado tanto para uso real quanto como projeto demonstrativo de alta qualidade técnica em engenharia de dados.
+- **O Framework (`comps`)** atua como plataforma corporativa leve: gerencia rede, resiliência térmica, validação de contratos (`ScrapedRecord`), relatórios estatísticos e pipeline de escrita de arquivos.
+- **Os Plugins** são funções efêmeras que rodam injetadas e contêm puramente a regra de parsing específica de cada site.
 
----
-
-## 💡 Visão Geral Técnica & Decisões de Engenharia
-
-Para entender este repositório sob a ótica de engenharia de software e arquitetura de dados, vale destacar as principais decisões de design adotadas:
-
-1. **Padrão de Plugin & Despacho Dinâmico (*Strategy Pattern*)**:
-   - Em vez de um grande arquivo monolítico com múltiplos `if/else`, cada site suportado é um módulo isolado.
-   - O framework descobre e despacha a requisição para o plugin correto com base na URL do alvo, garantindo desacoplamento total.
-
-2. **Resiliência Multi-Camada**:
-   - **Download Adaptativo**: Alterna automaticamente entre requisições HTTP estáticas via `httpx` (para máxima performance) e navegadores headless via `playwright` (quando a página exige execução de JS).
-   - **Retentativas Inteligentes**: Utiliza *exponential backoff* com *jitter* via `tenacity` para evitar ser bloqueado por *rate limiting*.
-   - **Tratamento Gracioso de Erros**: Falhas de parsing em itens individuais não interrompem o lote todo; em vez disso, são registradas no pipeline de auditoria.
-
-3. **Contratos Fortes e Qualidade de Dados**:
-   - Uso de schemas **Pydantic v2** para garantir a estrutura do `ScrapedRecord`. Se o HTML do site mudar e um campo essencial desaparecer, a falha é capturada e reportada imediatamente pelo comando `comps validate`.
-
-4. **Foco em Testabilidade & DX (Developer Experience)**:
-   - **Automação de Boilerplate**: O comando `comps plugins new` gera toda a estrutura necessária para um novo site (plugin, teste e fixture de mock HTML) em um único passo.
-   - **Testes Offline**: A suíte com mais de 80 testes roda 100% offline utilizando fixtures salvas localmente, tornando o CI extremamente rápido e determinístico.
-
+Não se trata de uma ferramenta para "invadir" servidores ou contornar medidas severas de segurança de forma hostil. Pelo contrário: é uma fundação organizada, previsível e escalável para uso responsável, tolerando as intempéries transitórias da rede global.
 
 ---
 
-## ⚙️ Arquitetura & Tecnologias Utilizadas (Tech Stack)
+## 💡 Decisões Técnicas e Arquitetura
 
-### 🧱 Tecnologias Core
+Para entender este repositório sob a ótica de engenharia de software e arquitetura de dados, vale destacar os pilares de design:
 
-| Categoria | Tecnologia | Função no Projeto |
+### 1. Padrão de Plugin & Despacho Dinâmico (*Strategy Pattern*)
+
+Em vez de um grande monolito (com múltiplos `if/else`), cada site suportado é isolado. O framework utiliza anotações (`@register`) para vincular uma função a um domínio. No momento da execução, a engine extrai a base da URL e despacha o parsing dinamicamente para a estratégia correta, mantendo desacoplamento total.
+
+### 2. Resiliência de Download (Playwright + HTTPX)
+
+Por ser voltado à precisão em ambientes modernos (SPAs), o Compsognathus prioriza o download mais garantido sobre o mais barato:
+
+- **Camada 1 (Playwright):** Renderiza o Chromium Headless com flags que simulam um uso real e aguardam o conteúdo de JavaScript carregar, superando WAFs superficiais e páginas SPA.
+- **Camada 2 (HTTPX):** Age como um fallback caso a inicialização ou o timeout da primeira tentativa excedam limites.
+- Em paralelo, o **Tenacity** gerencia um *exponential backoff* com *jitter* no envio das URLs, espalhando picos e evitando o bloqueio primário de taxa (rate limits).
+
+### 3. Validação e Qualidade de Dados Imediata
+
+Não confiamos em scrapings silenciosos que retornam *None*.
+Através do schema do **Pydantic v2**, cada `ScrapedRecord` é garantido contra o contrato. Se a árvore DOM ou a API subjacente do alvo mudar misteriosamente, a função não joga o dataset no lixo de vez: ela encerra as colunas corrompidas com uma *parse_error* preservando o dado incompleto. O comando `comps validate` pode investigar essas falhas posteriormente para que a manutenção seja cirúrgica e não destrutiva.
+
+---
+
+## ⚖️ Trade-offs Arquiteturais
+
+| Decisão | Motivação | Trade-off / Preço Pago |
+|---|---|---|
+| **Plugins por domínio** | Isola as inevitáveis quebras de HTML frequentes de cada site, limitando o raio de ação. | A complexidade horizontal cresce; cada novo domínio exige sua própria função de parsing registrada. |
+| **Playwright primeiro, depois HTTP** | Assegura que páginas dinâmicas ou blindadas tragam o DOM completo de primeira. | O navegador consome mais memória e recursos computacionais, sacrificando performance bruta extrema. |
+| **Preservar registros com falhas** | Um erro em um nó não invalida um lote demorado. Mantém o pipeline de dados limpo para posterior reprocessamento/auditoria. | O dataset final pode incluir valores nulos em colunas essenciais se ignorados, forçando o uso de `comps validate`. |
+| **Fixtures HTML sintéticas para os testes** | Os testes rodam 100% offline, de forma rápida, previsível, e livre de problemas de rede. | Testes não falharão se o site real for redesenhado; os mocks exigem testes rotineiros complementares no "mundo real". |
+
+---
+
+## ⚙️ A Stack Tecnológica
+
+| Camada | Ferramenta | Responsabilidade |
 | :--- | :--- | :--- |
-| **Linguagem** | **Python 3.11+** (suporte até 3.14) | Base do projeto com tipagem estática moderna (`typing`). |
-| **Interface CLI** | **Typer** + **Rich** | Interface de linha de comando elegante, com tabelas coloridas, barras de progresso e diagnósticos visuais. |
-| **Downloader & Rede** | **HTTPX** (com HTTP/2) | Cliente HTTP ultrarrápido com suporte a HTTP/2 para páginas estáticas e APIs. |
-| **Navegador Headless**| **Playwright** | Automação e renderização de navegadores (Chromium) para Single Page Applications (SPAs) e conteúdo gerado por JavaScript. |
-| **Parsing HTML** | **BeautifulSoup 4** | Extração de dados da árvore DOM em HTML estático e fragmentos trazidos por scripts. |
-| **Schemas & Contratos**| **Pydantic v2** | Definição de contratos de dados estruturados (`ScrapedRecord`), coerção de tipos e validação estrita. |
-| **Resiliência** | **Tenacity** | Sistema de retentativas configurável com *exponential backoff* e *jitter* para evitar bloqueios de taxa (*rate limiting*). |
-| **Processamento de Dados**| **Pandas** + **PyArrow** | Manipulação tabular de dados e serialização rápida em **CSV**, **Parquet**, **JSON** e **JSONL**. |
-| **Testes & Qualidade** | **Pytest** + **Ruff** + **CI** | 81+ testes automatizados (80%+ de cobertura) e linters para garantia de qualidade no GitHub Actions. |
+| **Linguagem & Contratos** | Python 3.11+ / Pydantic v2 | Base com *Type Hints* rígidos e validação no tempo de execução. |
+| **CLI & UX** | Typer + Rich | CLI imersiva e tipada; terminal colorido com diagnóstico de pipeline. |
+| **Rede & Scrape** | Playwright / HTTPX / Tenacity | Camadas redundantes e retry com backoff contra WAF e Timeouts. |
+| **Parsing** | BeautifulSoup 4 / Lógica Híbrida | Extração por JSON-LD, metatags, variáveis `__NEXT_DATA__` e CSS. |
+| **Data Engineering** | Pandas + PyArrow | Escrita tabular eficiente (Parquet, SQLite, CSV, JSON Lines). |
+| **Qualidade & CI** | Pytest / Ruff / Github Actions | Uma extensa e veloz suíte de testes (offline) validando contratos continuamente. |
 
 ---
 
-## 🔄 Como Funciona a Pipeline
+## 🔄 O Fluxo Interno 
 
 ```mermaid
 flowchart TD
-    A[Usuário / CLI: comps scrape URL] --> B[Despachante de Plugins]
-    B -->|Identifica Domínio| C[Plugin Específico]
-    A --> D[Downloader Component]
-    D -->|Requisição HTTP / Playwright| E[Conteúdo HTML / JSON]
-    E --> C
-    C -->|Extrai dados| F[ScrapedRecord Pydantic]
-    F --> G[Pipeline de Qualidade / Validação]
-    G --> H[Exportação: CSV / Parquet / JSON]
-    G --> I[Relatório / Metrics: comps report]
+    A[Usuário: comps scrape URL] --> B[Downloader Adaptativo]
+    B -->|Tentativa 1: Playwright| C{Valid HTML?}
+    C -- Erro / Timeout --> D[Tentativa 2: httpx Fallback]
+    D --> E[Registry / Despachante]
+    C -- Sucesso --> E
+    E -->|Identifica Domínio| F[Plugin Específico]
+    F -->|Extrai Dados| G[ScrapedRecord / Pydantic]
+    G --> H[Auditoria Falhas vs Qualidade]
+    H --> I[Gravação: Parquet / SQLite / JSON]
 ```
 
-1. **Despacho Automático**: Ao rodar `comps scrape <URL>`, o framework identifica qual plugin está registrado para responder àquele domínio.
-2. **Download Resiliente**: O `Downloader` realiza a busca do conteúdo tratando retentativas e timeouts de forma uniforme.
-3. **Parsing Isolado**: O plugin converte o HTML ou payload JSON em instâncias de `ScrapedRecord`.
-4. **Auditoria de Qualidade**: Erros de parsing, links quebrados ou campos nulos são capturados no relatório do dataset sem quebrar a execução global.
-5. **Serialização Tabular**: Dados válidos são gravados no formato desejado.
+## Próximos Passos (Uso)
 
----
-
-## 🚀 Como Usar
-
-### 1. Instalação
-
-```bash
-# Clone o repositório
-git clone https://github.com/elycbarros/compsognathus.git
-cd compsognathus
-
-# Crie e ative um ambiente virtual
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Instale as dependências (incluindo pacotes de desenvolvimento)
-pip install -e .[dev]
-
-# Instale o navegador do Playwright (para alvos dinâmicos)
-playwright install chromium
-```
-
----
-
-### 2. Principais Comandos da CLI
-
-O CLI oferece dois caminhos equivalentes: `comps` (curto) ou `compsognathus` (longo).
-
-#### 📥 Executar Raspagem (`scrape`)
-```bash
-# Raspar uma URL e salvar em Parquet (padrão)
-comps scrape "https://exemplo.com/imovel/123"
-
-# Raspar especificando o formato de saída e número de trabalhadores concorrentes
-comps scrape "https://exemplo.com/imovel/123" --output dados.csv --concurrency 4
-```
-
-#### 🆕 Criar um Novo Plugin (`plugins new`)
-O framework possui gerador automático de código para criar novos plugins prontos para uso:
-```bash
-comps plugins new meu_site "https://meusite.com/item/1"
-```
-*Isso criará automaticamente o plugin em `compsognathus/plugins/`, a fixture de teste em `tests/fixtures/` e o teste unitário em `tests/`.*
-
-#### 🔍 Diagnosticar Qualidade (`validate`)
-Verifique se um dataset gerado possui campos vazios, dados corrompidos ou taxas anômalas de falha:
-```bash
-comps validate ./output/dataset.parquet
-```
-
-#### 📊 Gerar Relatório de Dataset (`report`)
-Exiba estatísticas detalhadas sobre o dataset extraído diretamente no terminal:
-```bash
-comps report ./output/dataset.parquet
-```
-
-#### 🧪 Rodar a Suíte de Testes
-```bash
-# Executar todos os testes
-pytest
-
-# Executar com relatório de cobertura de código
-pytest --cov=compsognathus
-```
-
----
-
-## 📁 Estrutura do Repositório
-
-```text
-compsognathus/
-├── compsognathus/            # Código-fonte principal
-│   ├── cli.py                # Interface de Linha de Comando (Typer)
-│   ├── downloader.py         # Módulo de download (HTTPX + Playwright + Tenacity)
-│   ├── core/                 # Classes base, modelos Pydantic e pipeline
-│   ├── parsers/              # Parsers utilitários reutilizáveis (JSON-LD, etc.)
-│   └── plugins/              # Plugins por domínio (ex: vivareal, zap, etc.)
-├── tests/                    # Suíte de 81+ testes automatizados
-│   ├── conftest.py           # Fixtures compartilhadas
-│   └── test_*.py             # Testes de unidade e integração
-├── docs/                     # Documentação e ativos visuais
-├── pyproject.toml            # Configuração de build, dependências e ferramentas
-├── README.md                 # Visão geral rápida e badges
-└── O_QUE_SOU.md              # Este documento explicativo
-```
-
----
-
-## ✨ Por que o Compsognathus se Destaca?
-
-- 🔒 **Tipagem e Contratos Fortes**: Toda extração passa por validação via Pydantic.
-- 🧱 **Extensibilidade**: Adicionar suporte a um novo site leva poucos minutos com o comando `comps plugins new`.
-- ⚡ **Alta Performance**: Alterna inteligentemente entre requisições HTTP estáticas diretas e renderização via Playwright.
-- 💎 **Experiência do Desenvolvedor**: CLI visualmente rica com Rich, tratamento claro de erros e alta cobertura de testes.
+- Se você quer entender como instalar, rodar e exportar na linha de comando, acesse o passo a passo completo no [**DIDATICO.md**](DIDATICO.md).
+- Se sua intenção for criar um módulo de extração para o seu próprio site de interesse, acesse o [**Tutorial de Criação de Plugins**](docs/writing-a-plugin.md).

@@ -1,224 +1,108 @@
 # Como criar um Plugin para o Compsognathus
 
-Este guia mostra dois caminhos: um **exemplo mínimo** para entender o contrato
-de um plugin e um **template robusto** para adaptar a sites reais. Um parser
-mínimo cabe em poucas linhas; um parser confiável normalmente precisa de
-tratamento de campos ausentes, conversão de valores e testes.
+Este guia ensina como usar a CLI para gerar e testar a estrutura de um plugin. Um parser mínimo requer poucas linhas, mas a internet real é instável: parsers dependem intimamente da estrutura da fonte e exigem manutenção quando o HTML ou o *payload* muda. 
+
+O foco deste guia é garantir que, quando a fonte mudar, seu plugin falhe de forma elegante através do uso de `ScrapedRecord` e de auditoria controlada.
 
 ---
 
-## Estrutura de um Plugin
+## 1. Scaffold Inicial de Código (Automático)
 
-Todo plugin é um arquivo `.py` com três elementos:
+O framework resolve a parte chata de registrar arquivos e suítes de teste automaticamente. Evite criar arquivos à mão e deixe o CLI montar as bases.
 
-1. **Docstring** — descreve o que o plugin faz
-2. **`@register`** — vincula o plugin a um domínio
-3. **`parse(html, url)`** — extrai os dados e retorna um `ScrapedRecord`
+Abra seu terminal na raiz do projeto e execute:
+
+```bash
+comps plugins new meusite.com.br
+```
+
+Este único comando gera:
+1. O parser inicial em `compsognathus/plugins/meusite_com_br.py` com o `@register`.
+2. Uma string de registro no arquivo `compsognathus/plugins/__init__.py` para garantir que ele seja descoberto.
+3. Uma fixture de teste base (HTML vazio) em `tests/fixtures/meusite_com_br_sample.html`.
+4. Um arquivo de teste unitário base em `tests/test_meusite_com_br.py`.
+
+---
+
+## 2. Inspecionando o Alvo e Decidindo a Estrutura
+
+Antes de programar o parser, use seu navegador para acessar a URL. Vá ao **Inspetor (F12) → Elements** e procure os dados seguindo essa hierarquia de preferência técnica:
+
+1. **JSON-LD (Schema.org):** Procure pela tag `<script type="application/ld+json">`. Se existir e contiver o dado, use isso. É o método mais imune a quebras cosméticas.
+2. **Payloads Embutidos de SPAs (Next.js/Nuxt):** Procure pelas strings `__NEXT_DATA__` ou `self.__next_f.push`. Os dados estarão em JSON formatado dentro do HTML.
+3. **Atributos de Teste (`data-testid`):** Muitas aplicações possuem âncoras para QAs (ex: `data-testid="product-price"`). São resistentes a mudanças de cor e tipografia.
+4. **Seletores CSS Genéricos:** O pior cenário, procure Classes CSS de hierarquia que referenciam o dado (ex: `<div class="price-box">`). Jamais selecione classes ofuscadas/criptográficas geradas por build como `.sc-bdfxgF.kiHWNp`, elas mudam na próxima compilação do site alvo.
+
+> **Regra de Ouro:** Não descreva um plugin como “resistente a qualquer mudança de site”. Todo scraper que depende da árvore DOM exige manutenção reativa à evolução da UI/UX daquele site.
+
+---
+
+## 3. O Contrato de Extração
+
+No arquivo `.py` do seu plugin (`compsognathus/plugins/meusite_com_br.py`), você verá uma estrutura similar a esta:
 
 ```python
 """
-Plugin: Nome do Site (dominio.com.br)
-Extrai: campo1, campo2, campo3
+Plugin: Nome do Site (meusite.com.br)
 """
 from bs4 import BeautifulSoup
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
 
-@register("dominio.com.br", schema=["campo1", "campo2"])
+@register("meusite.com.br", schema=["titulo", "preco"])
 def parse(html: str, url: str) -> ScrapedRecord:
-    soup = BeautifulSoup(html, "html.parser")
-    h1 = soup.find("h1")
-    campo1 = h1.get_text(strip=True) if h1 else None
-    return ScrapedRecord(
-        url=url,
-        site="meusite",
-        fields={"campo1": campo1},
-    )
-```
-
----
-
-## Passo a Passo
-
-### 1. Inspecione o site alvo
-
-Abra o site no navegador, vá em **F12 → Elements** e identifique:
-- Onde está o dado que você quer? (`<h1>`, `<span class="price">`, etc.)
-- O site usa JSON-LD? (`<script type="application/ld+json">`)
-- O site usa Next.js? Procure `__NEXT_DATA__` ou `self.__next_f.push`.
-
-> **Dica:** Dados em JSON-LD e payloads do Next.js são mais estáveis que
-> seletores CSS, que podem mudar a cada redesign do site.
-
-### 2. Copie o template
-
-```bash
-cp compsognathus/plugins/example_generic.py compsognathus/plugins/meusite.py
-```
-
-### 3. Edite o arquivo
-
-Substitua:
-- `"example.com"` → domínio do seu site
-- `schema=[...]` → lista dos campos que você extrai
-- A lógica de extração dentro de `parse()`
-
-### 4. Ative o plugin
-
-Adicione o import em `compsognathus/plugins/__init__.py`:
-
-```python
-import compsognathus.plugins.meusite  # noqa: F401
-```
-
-### 5. Crie uma fixture de teste
-
-Crie `tests/fixtures/meusite_sample.html` com um HTML de exemplo do site
-(pode ser uma versão simplificada/sintética).
-
-### 6. Escreva um teste
-
-```python
-# tests/test_parsers.py
-def test_meusite_extrai_campo1(load_fixture):
-    from compsognathus.plugins.meusite import parse
-    html = load_fixture("meusite_sample.html")
-    rec = parse(html, "https://meusite.com/item/1")
-    assert rec.fields["campo1"] is not None
-```
-
-### 7. Execute os testes
-
-```bash
-pytest tests/ -v
-```
-
----
-
-## Estratégias de Extração
-
-### Estratégia 1: JSON-LD (Schema.org) ✅ Preferencial
-
-Muitos sites incluem dados estruturados em tags `<script type="application/ld+json">`.
-Esses dados seguem o padrão Schema.org e são altamente estáveis.
-
-```python
-for script in soup.find_all("script", type="application/ld+json"):
-    data = json.loads(script.string or "")
-    if data.get("@type") == "Product":
-        preco = data["offers"]["price"]
-```
-
-### Estratégia 2: JSON embutido (Next.js) ✅ Estável
-
-Sites construídos com Next.js podem incluir dados em `__NEXT_DATA__` (modelo
-mais antigo) ou em chamadas `self.__next_f.push` (React Flight, modelo atual).
-O projeto já oferece `iter_next_payloads()` para lidar com ambos; prefira esse
-helper em vez de repetir a lógica de decodificação no plugin.
-
-```python
-from compsognathus.plugins._next_data import iter_next_payloads
-
-for payload in iter_next_payloads(soup):
-    # Percorra cada payload recursivamente para encontrar os dados.
-    pass
-```
-
-### Estratégia 3: Seletores CSS 🟡 Funcional (mas frágil)
-
-Use `data-testid` e `data-cy` (atributos de teste) — são mais estáveis que classes CSS.
-
-```python
-el = soup.select_one('[data-testid="product-price"]')
-preco = el.get_text(strip=True) if el else None
-```
-
-Evite seletores por classe gerada (ex: `.sc-bdfxgF.kiHWNp`) — mudam a cada build.
-
-### Estratégia 4: Meta tags 🟢 Boa para título/descrição
-
-```python
-meta = soup.find("meta", property="og:title")
-titulo = meta.get("content") if meta else None
-```
-
----
-
-## Exemplo Completo: Books to Scrape
-
-```python
-"""
-Plugin: Books to Scrape (books.toscrape.com)
-Site de demonstração open-to-scrape — ideal para testes sem WAF.
-Extrai: titulo, preco, avaliacao, disponibilidade
-"""
-import re
-from bs4 import BeautifulSoup
-from compsognathus.core.record import ScrapedRecord
-from compsognathus.core.registry import register
-
-RATING_MAP = {"One": 1, "Two": 2, "Three": 3, "Four": 4, "Five": 5}
-
-@register("books.toscrape.com", schema=["titulo", "preco", "avaliacao"])
-def parse(html: str, url: str) -> ScrapedRecord:
-    """Parser para books.toscrape.com — extrai livros com preço e avaliação."""
     soup = BeautifulSoup(html, "html.parser")
     errors = []
 
-    # Título via h1
-    titulo = soup.find("h1")
-    titulo = titulo.get_text(strip=True) if titulo else None
+    h1 = soup.find("h1")
+    titulo = h1.get_text(strip=True) if h1 else None
     if not titulo:
         errors.append("titulo")
 
-    # Preço via seletor CSS estável
-    preco_el = soup.select_one("p.price_color")
-    preco = None
-    if preco_el:
-        m = re.search(r"[\d.]+", preco_el.get_text())
-        preco = float(m.group(0)) if m else None
-    if not preco:
-        errors.append("preco")
-
-    # Avaliação (1-5) via classe da tag <p>
-    rating_el = soup.select_one("p.star-rating")
-    avaliacao = None
-    if rating_el:
-        classes = rating_el.get("class", [])
-        word = next((c for c in classes if c != "star-rating"), None)
-        avaliacao = RATING_MAP.get(word)
-
     return ScrapedRecord(
         url=url,
-        site="books_toscrape",
-        fields={"titulo": titulo, "preco": preco, "avaliacao": avaliacao},
+        site="meusite",
+        fields={"titulo": titulo, "preco": None},
         parse_ok=len(errors) == 0,
         parse_errors=errors,
     )
 ```
 
----
+O `@register` atua vinculando seu parser a URLs provindas daquele domínio base, e declarando formalmente o esquema de chaves que este parser retornará. Isso é usado na frente para unificar os esquemas no Parquet final.
 
-## Campos e Tipos Recomendados
-
-| Tipo de dado | Campo sugerido | Tipo Python |
-|---|---|---|
-| Título / Nome | `titulo`, `produto`, `cargo` | `str` |
-| Preço numérico | `preco`, `salario` | `float` |
-| Avaliação (0-5) | `avaliacao` | `float` |
-| Contagem | `quartos`, `num_avaliacoes` | `int` |
-| Texto longo | `descricao` | `str` (máx 1000–2000 chars) |
-| Localização | `cidade`, `estado`, `bairro` | `str` |
-| Data | `data_publicacao` | `str` (ISO 8601) |
-| URL | `url_imagem` | `str` |
-| Booleano | `disponivel`, `novo` | `bool` |
+A lógica de auditoria obriga que você, no parser, identifique quando campos centrais se encontrem ausentes (devido ao layout mudar subitamente) e inclua os nomes dessas chaves dentro da lista `parse_errors`. Isso alimentará os diagnósticos da ferramenta principal.
 
 ---
 
-## Dúvidas?
+## 4. Testes do Plugin
 
-Veja os plugins bundled como referência:
-- [`zapimoveis.py`](../compsognathus/plugins/zapimoveis.py) — exemplo com 3 camadas de extração
-- [`mercadolivre.py`](../compsognathus/plugins/mercadolivre.py) — exemplo com JSON-LD Schema.org Product
-- [`catho.py`](../compsognathus/plugins/catho.py) — exemplo com JSON-LD Schema.org JobPosting
-- [`example_generic.py`](../compsognathus/plugins/example_generic.py) — template minimalista comentado
+Você jamais precisará testar seu plugin rodando ele na internet aberta para confirmar seu parse localmente, evite banimentos acidentais desenvolvendo sempre usando a *fixture* estática que o framework criou pra você.
+
+1. Navegue até o site real.
+2. Salve o HTML renderizado real, e preencha a sua *fixture* em `tests/fixtures/meusite_com_br_sample.html`. Reduza o HTML para ter apenas 5 a 10kb preservando o nó pai da estrutura que você raspa.
+3. Altere o teste automatizado criado:
+
+```python
+# tests/test_meusite_com_br.py
+def test_meusite_com_br_extrai_dados(load_fixture):
+    from compsognathus.plugins.meusite_com_br import parse
+    html = load_fixture("meusite_com_br_sample.html")
+    rec = parse(html, "https://meusite.com.br/item/1")
+    
+    assert rec.fields["titulo"] is not None
+    assert rec.parse_ok is True
+    assert not rec.parse_errors
+```
+
+Rode os testes especificamente do seu plugin:
+```bash
+pytest tests/test_meusite_com_br.py -v
+```
+
+---
+
+## 5. Dúvidas Frequentes
+
+Se o *payload* Next.js (como o de React Flight) for complexo de desembaraçar à mão, o projeto já oferece um helper importável para desempacotar strings de servidor `self.__next_f.push`. 
+
+Acesse e avalie arquivos da própria base do projeto em `compsognathus/plugins/` (como `vivareal` e `mercadolivre`) para usar de exemplo para seus casos mais difíceis, prestando atenção de como os helpers importáveis (localizados em `compsognathus/parsers/`) foram utilizados.

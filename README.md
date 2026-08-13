@@ -4,169 +4,75 @@
 [![Tests](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml/badge.svg)](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Compsognathus é um framework de web scraping orientado a plugins. Ele deixa o
-trabalho repetitivo — baixar páginas, tentar novamente, identificar o parser,
-validar os dados e exportar o resultado — a cargo da CLI, para que cada plugin
-se concentre apenas em extrair os dados do seu domínio.
+**Compsognathus** (ou apenas `comps`) é um framework e CLI Python orientado a plugins para coleta estruturada e auditável de dados web. 
 
-O projeto foi pensado para ser fácil de aprender e suficientemente estruturado
-para uso real: exemplos mínimos explicam o contrato do plugin e templates
-robustos ajudam a lidar com HTML incompleto e dados variáveis.
+Ele deixa o trabalho repetitivo — tratar erros de rede, gerenciar retentativas anti-bloqueio, rodar navegadores headless, aplicar validação rigorosa de dados e exportar o dataset — a cargo do framework, para que cada plugin precise se concentrar apenas em extrair os dados específicos do seu domínio. Foi desenhado não como uma ferramenta isolada, mas como uma base sólida de engenharia de dados para preparação de informações para consumo posterior em análises ou automações.
 
 ![Demonstração da CLI do Compsognathus](docs/assets/cli-demo.svg)
 
-## O que ele oferece
+## Capacidades Principais
 
-- Plugins registrados por domínio, com despacho automático pela URL.
-- Download resiliente com Playwright e fallback HTTP.
-- Extração em camadas: dados estruturados, seletores CSS e metatags.
-- Exportação para Parquet, CSV, JSON, JSONL e SQLite.
-- Diagnóstico de downloads, parsing e campos obrigatórios com `comps validate`.
-- Scaffold que cria plugin, fixture e teste em um comando.
+- **Despacho dinâmico**: Plugins registrados por domínio, invocados automaticamente pela URL de origem.
+- **Download resiliente**: Usa Playwright (Chromium) em primeiro lugar para renderizar JavaScript e lidar com WAFs simples, e HTTPX como fallback. Inclui *exponential backoff* nativo contra limites de requisições.
+- **Extração limpa**: Foco em JSON-LD, payloads estruturados (como Next.js) e por último seletores CSS.
+- **Validação de esquema**: O contrato de extração é checado com Pydantic v2 (capturando quebras silenciosas no layout do alvo).
+- **Trilha de auditoria**: Falhas de download ou extração não descartam o dataset, mas são preservadas para diagnóstico (`comps validate`).
+- **Múltiplos Formatos**: Exportação embarcada para Parquet (padrão), CSV, JSON, JSONL e banco SQLite.
 
-Plugins incluídos: ZAP Imóveis, VivaReal, Mercado Livre, Catho e Books to Scrape.
+## Validação e Testes
 
-## Validação com dados reais
-
-Além das fixtures sintéticas, a versão 1.3.1 foi validada com uma amostra real
-e anonimizada de páginas do ZAP Imóveis e VivaReal:
-
-| Métrica | Resultado |
-|---|---:|
-| URLs processadas | 8 |
-| Downloads concluídos | 8/8 |
-| Parses completos | 8/8 |
-| Colunas exportadas | 18 |
-
-As URLs e os HTMLs reais não fazem parte do repositório para evitar publicar
-dados de terceiros. A suíte automatizada usa equivalentes sintéticos e
-determinísticos das estruturas observadas.
+O Compsognathus acompanha uma extensa suíte de testes (rodando offline via fixtures sintéticas HTML) para garantir confiabilidade sem spammar sites externos durante o CI. Além disso, as releases são validadas contra páginas reais anonimizadas antes do empacotamento, checando completude dos metadados e estabilidade dos componentes centrais.
 
 ## Início rápido
 
-Você precisa de Python 3.11+ e do Chromium usado pelo Playwright.
+É necessário Python 3.11+ e o navegador Chromium (usado pelo Playwright).
 
 ```bash
 git clone https://github.com/elycbarros/compsognathus.git
 cd compsognathus
 
+# Criação do ambiente virtual
 python -m venv .venv
 source .venv/bin/activate
+
+# Instala o projeto, as dependências de execução e de testes
 pip install -e ".[dev]"
 playwright install chromium
 ```
 
-Crie um arquivo `links.txt` com uma URL HTTP(S) por linha e execute:
+Crie um arquivo `links.txt` com uma URL HTTP(S) válida por linha e execute:
 
 ```bash
-# Confirme os plugins disponíveis antes de baixar qualquer página.
+# Confirme os plugins disponíveis sem acionar downloads
 comps scrape links.txt --dry-run
 
-# Raspe e exporte o dataset.
+# Raspe as URLs e exporte o dataset em Parquet (padrao)
 comps scrape links.txt --output dados.parquet
 
-# Inspecione a qualidade da coleta.
+# Inspecione a qualidade e completude da coleta
 comps validate dados.parquet --fail-on-error
 comps report dados.parquet --html relatorio.html
 ```
 
-Para outros formatos e concorrência:
+Você pode utilizar a concorrência e escolher diferentes saídas:
 
 ```bash
 comps scrape links.txt --format sqlite --output dados.db --concurrency 3
-comps scrape links.txt --format jsonl --output dados.jsonl
 ```
 
-## Como funciona
+## Documentação Completa
 
-```text
-URLs → downloader → HTML → registry → plugin → ScrapedRecord → dataset
-```
+Para não sobrecarregar este arquivo, a documentação é dividida de acordo com sua finalidade:
 
-O `registry` escolhe o plugin pelo domínio. O plugin retorna um `ScrapedRecord`
-com metadados fixos e um dicionário livre de campos; o orquestrador transforma
-esses registros em um dataset exportável.
-
-### Decisões técnicas
-
-| Decisão | Motivação | Trade-off |
-|---|---|---|
-| Plugins por domínio | Isola mudanças frequentes de cada site | Cada domínio precisa de manutenção própria |
-| Playwright com fallback HTTP | Combina páginas renderizadas e downloads rápidos | O navegador consome mais recursos |
-| Preservar registros com falha | Mantém o dataset auditável e permite reprocessamento | A saída inclui linhas incompletas |
-| Fixtures sintéticas | Testes rápidos, seguros e reproduzíveis | Não substituem validações periódicas com páginas reais |
-
-## Criando um plugin
-
-O caminho mais rápido cria código inicial, fixture sintética e teste:
-
-```bash
-comps plugins new olx.com.br
-```
-
-Depois, adapte os seletores ao HTML real e execute a suíte. Para aprender a
-estrutura com calma, use o [template comentado](compsognathus/plugins/example_generic.py)
-e o [guia de criação de plugins](docs/writing-a-plugin.md).
-
-Um plugin mínimo segue este contrato:
-
-```python
-from bs4 import BeautifulSoup
-
-from compsognathus.core.record import ScrapedRecord
-from compsognathus.core.registry import register
-
-
-@register("meusite.com.br", schema=["titulo"])
-def parse(html: str, url: str) -> ScrapedRecord:
-    soup = BeautifulSoup(html, "html.parser")
-    h1 = soup.find("h1")
-    titulo = h1.get_text(strip=True) if h1 else None
-    return ScrapedRecord(url=url, site="meusite", fields={"titulo": titulo})
-```
-
-## Qualidade e testes
-
-Use estes comandos antes de enviar alterações:
-
-```bash
-ruff check .
-pytest -q
-pytest --cov=compsognathus --cov-report=term-missing
-```
-
-As fixtures em `tests/fixtures/` são sintéticas. Isso mantém os testes rápidos,
-reproduzíveis e independentes dos sites externos.
-
-## Estrutura do projeto
-
-```text
-compsognathus/
-├── core/          # modelo ScrapedRecord e registro de plugins
-├── plugins/       # parsers e helpers compartilhados
-├── downloader.py  # Playwright, HTTP e tentativas de download
-├── scraper.py     # orquestra download, parse e exportação
-├── datasets.py    # leitura compartilhada por report e validate
-└── cli.py         # comandos da interface
-
-tests/             # testes e fixtures HTML sintéticas
-docs/              # documentação aprofundada
-```
-
-## Contribuindo
-
-Contribuições são bem-vindas. Mantenha alterações pequenas, inclua testes para
-novos comportamentos e execute lint e testes antes de abrir um pull request.
-Para novos sites, prefira dados estruturados (JSON-LD ou Next.js) antes de
-seletores CSS frágeis.
+- 🏗️ **Arquitetura e Design:** Para entender a separação de camadas, decisões técnicas, trade-offs e como a pipeline funciona sob o capô, consulte [`O_QUE_SOU.md`](O_QUE_SOU.md).
+- 🚀 **Tutorial Executável:** Para um guia de execução do começo ao fim (geração de projeto e interpretação dos comandos e saídas), leia o guia de uso no [`DIDATICO.md`](DIDATICO.md).
+- 🧩 **Extensão (Plugins):** O framework oferece um scaffolding automático de plugins, fixtures e testes. Para aprender a criar o seu, veja [`docs/writing-a-plugin.md`](docs/writing-a-plugin.md).
+- 📝 **Histórico de Mudanças:** Para ver as atualizações e novos formatos implementados em cada release, visite o [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Segurança e uso responsável
 
-Respeite os termos de uso, limites de acesso e políticas dos sites coletados.
-Não inclua credenciais, cookies, dados pessoais ou páginas reais sensíveis nas
-fixtures. Para relatar uma vulnerabilidade, use uma divulgação privada pelo
-repositório, sem publicar detalhes exploráveis em uma issue pública.
+Compsognathus automatiza extrações técnicas. Respeite as políticas de rate-limit, o `robots.txt` e os Termos de Uso (ToS) dos sites raspados. O framework **não** contorna bloqueios rígidos baseados em *fingerprinting* complexo nem autenticações anti-bot, e os dados devem ser consumidos e anonimizados dentro das leis aplicáveis. Se você reportar uma vulnerabilidade na própria ferramenta, utilize uma abertura de issue de segurança de forma privada no repositório.
 
 ## Licença
 
-Compsognathus é software de código aberto sob a licença [MIT](LICENSE).
+Compsognathus é software de código aberto e liberado sob a licença [MIT](LICENSE).
