@@ -81,6 +81,20 @@ def test_download_url_salva_resultado_playwright(tmp_path: Path, monkeypatch):
     assert result.size_bytes == len(VALID_HTML)
 
 
+def test_download_url_mede_tamanho_real_em_bytes_utf8(tmp_path: Path, monkeypatch):
+    html = VALID_HTML.replace("conteudo", "conteúdo")
+    monkeypatch.setattr("compsognathus.downloader._try_playwright", lambda url: html)
+    monkeypatch.setattr(
+        "compsognathus.downloader._try_httpx",
+        lambda url: (_ for _ in ()).throw(AssertionError("fallback não deveria executar")),
+    )
+
+    result = download_url("https://example.com/item-unicode", tmp_path)
+
+    assert result.size_bytes == len(html.encode("utf-8"))
+    assert result.size_bytes > len(html)
+
+
 def test_download_url_usa_httpx_como_fallback(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "compsognathus.downloader._try_playwright",

@@ -7,6 +7,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
 ## [Em desenvolvimento]
 
+### Corrigido
+- `comps report` agora normaliza valores booleanos textuais antes de calcular a taxa de sucesso, inclusive no relatório HTML.
+- A prévia da CLI aceita campos aninhados, como listas e dicionários, sem falhar ao verificar valores ausentes.
+- A validação de schema trata `NaN` como campo ausente, preservando a confiabilidade de `parse_ok`.
+- `DownloadResult.size_bytes` e os logs de download agora medem o tamanho UTF-8 real, em vez da quantidade de caracteres.
+
 ### Documentação
 - Documentação inteiramente revisada para centralizar o `README.md` como entrada rápida executiva, transferindo a carga didática integralmente para `DIDATICO.md` e a carga arquitetural profunda para `O_QUE_SOU.md`.
 - Esclarecimento na hierarquia do downloader corrigido nos diagramas para afirmar que `Playwright` é a primeira camada, servindo `httpx` como fallback resiliente.

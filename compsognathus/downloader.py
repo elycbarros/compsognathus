@@ -63,6 +63,11 @@ def _url_to_filename(url: str) -> str:
     return hashlib.md5(url.encode()).hexdigest() + ".html"
 
 
+def _html_size_bytes(html: str) -> int:
+    """Retorna o tamanho real do HTML quando persistido em UTF-8."""
+    return len(html.encode("utf-8"))
+
+
 def _is_valid_html(html: str) -> bool:
     """Valida se o HTML recebido contém conteúdo real (não é erro de WAF)."""
     if not html or len(html.strip()) < 512:
@@ -126,7 +131,7 @@ def _try_playwright(url: str) -> str:
             if not _is_valid_html(html):
                 raise ValueError("HTML inválido ou bloqueado por WAF")
 
-            logger.debug("Playwright: OK (%d KB) — %s", len(html) // 1024, url)
+            logger.debug("Playwright: OK (%d KB) — %s", _html_size_bytes(html) // 1024, url)
             return html
         except PWTimeout as exc:
             logger.warning("Playwright: timeout em %s — %s", url, exc)
@@ -167,7 +172,7 @@ def _try_httpx(url: str) -> str:
     if not _is_valid_html(html):
         raise ValueError("HTML inválido ou bloqueado por WAF")
 
-    logger.debug("httpx: OK (%d KB) — %s", len(html) // 1024, url)
+    logger.debug("httpx: OK (%d KB) — %s", _html_size_bytes(html) // 1024, url)
     return html
 
 
@@ -183,7 +188,7 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
     try:
         html = _try_playwright(url)
         filepath.write_text(html, encoding="utf-8")
-        size = len(html)
+        size = _html_size_bytes(html)
         logger.info("✅ playwright  %s (%d KB)", url, size // 1024)
         return DownloadResult(url=url, filepath=filepath, method="playwright", ok=True, size_bytes=size)
     except Exception as exc:
@@ -193,7 +198,7 @@ def download_url(url: str, output_dir: Path) -> DownloadResult:
     try:
         html = _try_httpx(url)
         filepath.write_text(html, encoding="utf-8")
-        size = len(html)
+        size = _html_size_bytes(html)
         logger.info("⚠️  httpx       %s (%d KB)", url, size // 1024)
         return DownloadResult(url=url, filepath=filepath, method="httpx", ok=True, size_bytes=size)
     except Exception as exc:

@@ -34,6 +34,15 @@ def _fallback_site(url: str) -> str:
     return host[4:] if host.startswith("www.") else host or "unknown"
 
 
+def _is_missing_field(value: object) -> bool:
+    """Identifica valores ausentes sem confundir coleções válidas com escalares."""
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return not value.strip()
+    return bool(pd.isna(value)) if pd.api.types.is_scalar(value) else False
+
+
 def _parse_html_file(filepath: Path, url: str) -> ScrapedRecord:
     """Lê um HTML salvo em disco e converte falhas de parse em registro auditável."""
     try:
@@ -54,8 +63,7 @@ def _parse_html_file(filepath: Path, url: str) -> ScrapedRecord:
         missing = [
             field for field in schema
             if field not in record.fields
-            or record.fields[field] is None
-            or (isinstance(record.fields[field], str) and not record.fields[field].strip())
+            or _is_missing_field(record.fields[field])
         ]
         errors = list(dict.fromkeys([*record.parse_errors, *[f"missing: {field}" for field in missing]]))
         return record.model_copy(update={"parse_ok": record.parse_ok and not missing, "parse_errors": errors})

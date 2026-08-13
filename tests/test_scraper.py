@@ -1,5 +1,6 @@
 """Testes do pipeline com downloads simulados e sem acesso à rede."""
 
+import math
 from pathlib import Path
 
 from compsognathus.core.record import ScrapedRecord
@@ -60,3 +61,24 @@ def test_scrape_aplica_schema_e_protege_metadados(tmp_path, monkeypatch):
     assert df.iloc[0]["url"] == url
     assert bool(df.iloc[0]["parse_ok"]) is False
     assert "missing: titulo" in df.iloc[0]["parse_errors"]
+
+
+def test_scrape_considera_nan_como_campo_ausente(tmp_path, monkeypatch):
+    @register("nan-quality-test.com", schema=["preco"])
+    def parse_quality(html, url):
+        return ScrapedRecord(url=url, site="quality", fields={"preco": math.nan})
+
+    html_file = tmp_path / "quality.html"
+    html_file.write_text("<html><body>ok</body></html>", encoding="utf-8")
+    url = "https://nan-quality-test.com/item"
+    monkeypatch.setattr(
+        "compsognathus.scraper.download_all",
+        lambda urls, output_dir, concurrency, progress_callback: [
+            DownloadResult(url=url, filepath=html_file, method="httpx", ok=True)
+        ],
+    )
+
+    df = scrape([url], tmp_path / "out.json", fmt="json")
+
+    assert bool(df.iloc[0]["parse_ok"]) is False
+    assert "missing: preco" in df.iloc[0]["parse_errors"]

@@ -142,3 +142,29 @@ def test_cli_report_html_escapa_dados_nao_confiaveis(tmp_path):
     assert result.exit_code == 0
     assert payload not in rendered
     assert "&lt;script&gt;" in rendered
+
+
+def test_cli_report_normaliza_booleanos_textuais(tmp_path):
+    data = tmp_path / "dados.csv"
+    html_path = tmp_path / "report.html"
+    data.write_text("site,parse_ok\na,sim\nb,false\n", encoding="utf-8")
+
+    result = runner.invoke(app, ["report", str(data), "--html", str(html_path)])
+
+    assert result.exit_code == 0
+    assert "1/2 (50%)" in result.output
+    assert "50.0%" in html_path.read_text(encoding="utf-8")
+
+
+def test_cli_report_aceita_campos_aninhados_na_previa(tmp_path):
+    import pandas as pd
+
+    data = tmp_path / "dados.json"
+    pd.DataFrame(
+        [{"site": "exemplo", "parse_ok": True, "tags": ["python", "scraping"]}]
+    ).to_json(data, orient="records")
+
+    result = runner.invoke(app, ["report", str(data)])
+
+    assert result.exit_code == 0
+    assert "python" in result.output

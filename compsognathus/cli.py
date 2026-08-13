@@ -269,7 +269,8 @@ def report(
     console.print(f"\n[bold cyan]📊 Relatório:[/bold cyan] {file.name}\n")
 
     total = len(df)
-    ok = int(df["parse_ok"].sum()) if "parse_ok" in df.columns else total
+    parse_ok = quality_bool_series(df, "parse_ok", True)
+    ok = int(parse_ok.sum())
     sites = df["site"].unique().tolist() if "site" in df.columns else []
 
     metrics = Table(show_header=False, box=None, padding=(0, 2))
@@ -505,8 +506,15 @@ def _print_preview(df, max_rows: int = 5) -> None:
     for col in preview.columns:
         table.add_column(col, max_width=30, no_wrap=True)
 
+    def _format_cell(value) -> str:
+        if value is None:
+            return "–"
+        if pd.api.types.is_scalar(value) and pd.isna(value):
+            return "–"
+        return str(value)[:28]
+
     for _, row in preview.iterrows():
-        table.add_row(*[str(v)[:28] if pd.notna(v) else "–" for v in row])
+        table.add_row(*[_format_cell(value) for value in row])
 
     console.print(table)
 
@@ -514,7 +522,7 @@ def _print_preview(df, max_rows: int = 5) -> None:
 def _export_html_report(df, filename: str, output_path: Path) -> None:
     """Gera um relatório HTML visual em página única auto-contida."""
     total = len(df)
-    ok_count = int(df["parse_ok"].sum()) if "parse_ok" in df.columns else total
+    ok_count = int(quality_bool_series(df, "parse_ok", True).sum())
     taxa_ok = (ok_count / total * 100) if total > 0 else 0
 
     table_rows: list[str] = []
