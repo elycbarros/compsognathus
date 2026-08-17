@@ -44,7 +44,7 @@ Instale o framework no modo editável e instale os pacotes de desenvolvimento. I
 pip install -e ".[dev]"
 ```
 
-Em seguida, o download do Chromium precisa ser efetuado. Ele é o núcleo do navegador automatizado Playwright, essencial para os downloads de páginas complexas.
+Em seguida, instale o Chromium se os plugins usados dependerem de JavaScript. Plugins configurados com `httpx_first` ou `httpx_only` não precisam iniciar o navegador.
 
 ```bash
 playwright install chromium
@@ -61,9 +61,9 @@ comps --help
 ## 4. O Comportamento do Downloader
 
 Antes de raspar algo, é crucial entender como a ferramenta trata o acesso ao site para prever eventuais percalços:
-1. **Camada de renderização (`Playwright`)**: O sistema tenta em primeiro lugar acionar o Chromium para carregar a página tal como um navegador real, garantindo a carga de qualquer script e lidando com camadas passivas de firewalls (WAF).
-2. **Camada HTTP direta (`HTTPX`)**: Se o Playwright lançar *Timeout* ou for bloqueado por alguma instabilidade na renderização do DOM, o sistema não cancela de imediato; ele usa o cliente `httpx` (suportando HTTP/2) como *fallback* secundário, na tentativa de extrair o dado de um esqueleto estático de resposta.
-3. Se o limite de taxa de requisições (*Rate Limit*) ocorrer (bloqueio temporário), a ferramenta retentará com pequenos intervalos (*jitter*) antes de falhar permanentemente no URL em particular.
+1. **Política do plugin**: O domínio escolhe `browser_first`, `browser_only`, `httpx_first` ou `httpx_only`. Isso evita impor Chromium a páginas estáticas, sem retirar suporte a SPAs.
+2. **Resiliência comum**: HTTPX e Playwright usam timeout, retry, validação de HTML e registro de status, duração e método escolhido.
+3. **Controle responsável**: A CLI respeita `robots.txt` por padrão, limita concorrência e atraso por domínio e considera `Retry-After` quando o servidor sinaliza espera.
 
 ---
 
@@ -97,7 +97,17 @@ Agora é pra valer. Vamos pedir ao framework que converta o HTML puro em um arqu
 ```bash
 comps scrape alvos.txt --format csv --output livros.csv
 ```
-O console mostrará cada passo do download, e ao fim, o arquivo `livros.csv` será criado com as colunas (ex: Título, Preço, Disponibilidade, etc) definidas pelo criador do plugin.
+O console mostrará cada passo do download, e ao fim, os arquivos `livros.csv` e `livros.run.json` serão criados. O dataset terá as colunas (ex: Título, Preço, Disponibilidade, etc) definidas pelo criador do plugin, além dos metadados de auditoria.
+
+Para coletas longas, use um diretório de job. O SQLite guarda o progresso e os HTMLs podem ser reaproveitados:
+
+```bash
+comps scrape alvos.txt --job-dir .jobs/livros --cache-html
+comps scrape alvos.txt --job-dir .jobs/livros --resume
+```
+
+O `--force` ignora o HTML em cache. Para uma política diferente de acesso, use
+`--robots ignore` somente quando isso for permitido pelos termos do alvo.
 
 ---
 
@@ -131,10 +141,16 @@ O arquivo gerado em `compsognathus/plugins/novo-alvo.py` terá comentários úte
 
 > O Tutorial profundo de como extrair valores via JSON-LD e escrever este plugin está no material adicional em [`docs/writing-a-plugin.md`](docs/writing-a-plugin.md).
 
+Plugins que precisam ser distribuídos separadamente podem usar entry points
+Python. O contrato e o exemplo estão no mesmo guia, na seção **Plugin externo
+instalável**. O fluxo continua sendo o mesmo: o plugin registra o domínio e
+fornece apenas a lógica de extração.
+
 ---
 
 ## 8. Limpeza de Artefatos Locais e Troubleshooting
 
-- **Travamentos no scraping**: Caso as requisições aparentem estar travadas e os Playwrights fiquem em loop, o problema costuma ser limites duros IP-based. O sistema eventualmente estourará `TimeoutError` nas instâncias travadas e gravará o log. Diminua a `--concurrency`.
+- **Travamentos no scraping**: Caso as requisições aparentem estar travadas, consulte o manifesto e o log para distinguir timeout, bloqueio e espera por domínio. Diminua `--concurrency`, `--domain-concurrency` ou aumente `--domain-delay` antes de tentar novamente.
+- **Retomada**: Se a coleta foi iniciada com `--job-dir`, use o mesmo diretório e `--resume`. Não altere a lista de URLs entre as duas execuções; o job rejeita listas incompatíveis para evitar misturar datasets.
 - **Desativação**: Para fechar o ambiente virtual do terminal quando terminar: `deactivate`.
 - **Limpeza**: As saídas de `csv`, `parquet`, `jsonl` e arquivos temporários criados acidentalmente podem ser removidos normalmente. Nenhuma configuração global da sua máquina é alterada, os dados se mantém onde foram solicitados.

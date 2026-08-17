@@ -72,9 +72,72 @@ O `@register` atua vinculando seu parser a URLs provindas daquele domínio base,
 
 A lógica de auditoria obriga que você, no parser, identifique quando campos centrais se encontrem ausentes (devido ao layout mudar subitamente) e inclua os nomes dessas chaves dentro da lista `parse_errors`. Isso alimentará os diagnósticos da ferramenta principal.
 
+### Contrato tipado e política de download (opcionais)
+
+Quando os tipos dos dados forem importantes, declare um modelo Pydantic. O
+framework preserva os campos extras, mas marca o registro como inválido quando
+um tipo ou restrição não for atendido:
+
+```python
+from pydantic import BaseModel
+from compsognathus.downloader import DownloadPolicy
+
+class Produto(BaseModel):
+    titulo: str
+    preco: float
+
+@register(
+    "meusite.com.br",
+    schema=["titulo", "preco"],
+    model=Produto,
+    download_policy=DownloadPolicy(preferred="httpx_first"),
+)
+def parse(html: str, url: str) -> ScrapedRecord:
+    ...
+```
+
+Use `browser_first` para páginas que dependem de JavaScript, `httpx_first`
+para HTML estático e as variantes `*_only` quando o fallback não fizer
+sentido. A política também aceita `timeout_seconds`, `wait_after_load_ms` e
+`headers`.
+
+## 4. Plugin externo instalável
+
+Um pacote externo pode registrar plugins sem editar o código do Compsognathus.
+Exponha uma função sem argumentos que use `@register` e declare o entry point
+no `pyproject.toml` do pacote:
+
+```toml
+[project.entry-points."compsognathus.plugins"]
+meu_site = "meu_pacote.plugin:register_plugin"
+```
+
+```python
+from compsognathus.core.registry import register
+
+def register_plugin():
+    @register("meusite.com.br", schema=["titulo"])
+    def parse(html: str, url: str):
+        ...
+```
+
+Depois de instalar o pacote, confirme a descoberta com:
+
+```bash
+comps plugins list
+```
+
+O comando exibe a origem e a versão do plugin. Dois plugins não podem registrar
+o mesmo domínio; o conflito é reportado sem substituir silenciosamente o
+parser já carregado.
+
+Cada execução também produz um manifesto ao lado do dataset, por exemplo
+`dados.run.json`. Ele pode ser usado por ferramentas externas para comparar
+duração, retries, cache, status HTTP e falhas sem analisar logs.
+
 ---
 
-## 4. Testes do Plugin
+## 5. Testes do Plugin
 
 Você jamais precisará testar seu plugin rodando ele na internet aberta para confirmar seu parse localmente, evite banimentos acidentais desenvolvendo sempre usando a *fixture* estática que o framework criou pra você.
 
@@ -101,8 +164,8 @@ pytest tests/test_meusite_com_br.py -v
 
 ---
 
-## 5. Dúvidas Frequentes
+## 6. Dúvidas Frequentes
 
 Se o *payload* Next.js (como o de React Flight) for complexo de desembaraçar à mão, o projeto já oferece um helper importável para desempacotar strings de servidor `self.__next_f.push`. 
 
-Acesse e avalie arquivos da própria base do projeto em `compsognathus/plugins/` (como `vivareal` e `mercadolivre`) para usar de exemplo para seus casos mais difíceis, prestando atenção de como os helpers importáveis (localizados em `compsognathus/parsers/`) foram utilizados.
+Acesse e avalie arquivos da própria base do projeto em `compsognathus/plugins/` (como `vivareal` e `mercadolivre`) para usar de exemplo para seus casos mais difíceis, prestando atenção em como os helpers compartilhados de `compsognathus/plugins/` são utilizados.

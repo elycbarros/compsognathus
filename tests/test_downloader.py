@@ -7,6 +7,10 @@ from pathlib import Path
 import pytest
 
 from compsognathus.downloader import (
+    DomainRateLimiter,
+    DownloadPolicy,
+    DownloadResult,
+    RobotsChecker,
     _is_valid_html,
     _try_httpx,
     _try_playwright,
@@ -107,6 +111,72 @@ def test_download_url_usa_httpx_como_fallback(tmp_path: Path, monkeypatch):
     assert result.ok is True
     assert result.method == "httpx"
     assert result.filepath.exists()
+
+
+def test_download_url_respeita_politica_httpx_only(tmp_path: Path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        "compsognathus.downloader._try_playwright",
+        lambda url, *args, **kwargs: (_ for _ in ()).throw(AssertionError("browser não deveria executar")),
+    )
+    monkeypatch.setattr(
+        "compsognathus.downloader._try_httpx",
+        lambda url, *args, **kwargs: calls.append(url) or VALID_HTML,
+    )
+
+    result = download_url(
+        "https://example.com/static",
+        tmp_path,
+        DownloadPolicy(preferred="httpx_only"),
+    )
+
+    assert result.ok is True
+    assert result.method == "httpx"
+    assert result.attempts == 1
+    assert result.final_url == "https://example.com/static"
+    assert calls == ["https://example.com/static"]
+
+
+def test_download_url_reutiliza_html_em_cache(tmp_path: Path, monkeypatch):
+    filepath = tmp_path / _url_to_filename("https://example.com/cache")
+    filepath.write_text(VALID_HTML, encoding="utf-8")
+    monkeypatch.setattr(
+        "compsognathus.downloader._try_httpx",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("não deveria baixar")),
+    )
+
+    result = download_url("https://example.com/cache", tmp_path, DownloadPolicy(preferred="httpx_only"), cache_enabled=True)
+
+    assert result.ok is True
+    assert result.method == "cache"
+    assert result.from_cache is True
+
+
+def test_domain_rate_limiter_aumenta_delay_em_erro(monkeypatch):
+    limiter = DomainRateLimiter(max_concurrency=1, min_delay=0.1)
+    slept = []
+    monkeypatch.setattr("compsognathus.downloader.time.sleep", lambda seconds: slept.append(seconds))
+
+    domain = limiter.acquire("https://example.com/a")
+    limiter.release(domain, DownloadResult("https://example.com/a", None, "error", False, status_code=429))
+    domain = limiter.acquire("https://example.com/b")
+    limiter.release(domain, DownloadResult("https://example.com/b", None, "httpx", True))
+
+    assert limiter._delays["example.com"] >= 0.1
+    assert slept
+
+
+def test_robots_checker_respeita_regra(monkeypatch):
+    class Response:
+        status_code = 200
+        url = "https://example.com/robots.txt"
+        text = "User-agent: *\nDisallow: /private\n"
+
+    monkeypatch.setattr("httpx.get", lambda *args, **kwargs: Response())
+    checker = RobotsChecker("respect")
+
+    assert checker.check("https://example.com/public") is True
+    assert checker.check("https://example.com/private/item") is False
 
 
 def test_download_all_sequencial_notifica_progresso(tmp_path: Path, monkeypatch):

@@ -1,9 +1,9 @@
 # O que sou? 🦕
 
-![Versão 1.3.1](https://img.shields.io/badge/vers%C3%A3o-1.3.1-blue.svg)
+![Linha arquitetural v1.6](https://img.shields.io/badge/linha-v1.6-blue.svg)
 [![Tests](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml/badge.svg)](https://github.com/elycbarros/compsognathus/actions/workflows/tests.yml)
 
-> **Compsognathus** (ou simplesmente **`comps`**) v1.3.1 é um framework e CLI Python para coleta estruturada e auditável de dados web, orientado a plugins.
+> **Compsognathus** (ou simplesmente **`comps`**) é um framework e CLI Python para coleta estruturada e auditável de dados web, orientado a plugins. Este documento descreve a linha arquitetural v1.6.
 > 
 > Ele cuida da infraestrutura complexa e repetitiva da raspagem de dados — downloads com navegadores headless, fallbacks resilientes HTTP, gestão de taxas e retentativas, validação de esquema via contratos fortes, auditoria de falhas e exportação analítica — para que você foque apenas na lógica de extração da página alvo.
 
@@ -28,20 +28,20 @@ Para entender este repositório sob a ótica de engenharia de software e arquite
 
 ### 1. Padrão de Plugin & Despacho Dinâmico (*Strategy Pattern*)
 
-Em vez de um grande monolito (com múltiplos `if/else`), cada site suportado é isolado. O framework utiliza anotações (`@register`) para vincular uma função a um domínio. No momento da execução, a engine extrai a base da URL e despacha o parsing dinamicamente para a estratégia correta, mantendo desacoplamento total.
+Em vez de um grande monolito (com múltiplos `if/else`), cada site suportado é isolado. O framework utiliza anotações (`@register`) para vincular uma função a um domínio. No momento da execução, a engine extrai a base da URL e despacha o parsing dinamicamente para a estratégia correta, mantendo desacoplamento total. Plugins podem ser bundled no pacote ou descobertos por entry points Python, sem mudar o fluxo principal.
 
-### 2. Resiliência de Download (Playwright + HTTPX)
+### 2. Resiliência de Download (política por plugin)
 
-Por ser voltado à precisão em ambientes modernos (SPAs), o Compsognathus prioriza o download mais garantido sobre o mais barato:
+O transporte é escolhido pelo plugin conforme a necessidade do domínio, preservando o caminho histórico como padrão:
 
-- **Camada 1 (Playwright):** Renderiza o Chromium Headless com flags que simulam um uso real e aguardam o conteúdo de JavaScript carregar, superando WAFs superficiais e páginas SPA.
-- **Camada 2 (HTTPX):** Age como um fallback caso a inicialização ou o timeout da primeira tentativa excedam limites.
-- Em paralelo, o **Tenacity** gerencia um *exponential backoff* com *jitter* no envio das URLs, espalhando picos e evitando o bloqueio primário de taxa (rate limits).
+- **`browser_first` / `browser_only`:** Renderiza o Chromium Headless quando a página depende de JavaScript.
+- **`httpx_first` / `httpx_only`:** Usa HTTP direto quando HTML ou JSON-LD estático é suficiente, evitando custo desnecessário.
+- **Resiliência comum:** Tenacity, cache opcional, limites por domínio, respeito a `Retry-After` e validação contra páginas de bloqueio.
 
 ### 3. Validação e Qualidade de Dados Imediata
 
 Não confiamos em scrapings silenciosos que retornam *None*.
-Através do schema do **Pydantic v2**, cada `ScrapedRecord` é garantido contra o contrato. Se a árvore DOM ou a API subjacente do alvo mudar misteriosamente, a função não joga o dataset no lixo de vez: ela encerra as colunas corrompidas com uma *parse_error* preservando o dado incompleto. O comando `comps validate` pode investigar essas falhas posteriormente para que a manutenção seja cirúrgica e não destrutiva.
+Através dos campos obrigatórios e, quando declarado, de um modelo tipado do **Pydantic v2**, cada `ScrapedRecord` é verificado contra o contrato. Se a árvore DOM ou a API subjacente do alvo mudar misteriosamente, a função não joga o dataset no lixo de vez: ela encerra as colunas corrompidas com uma *parse_error* preservando o dado incompleto. O comando `comps validate` pode investigar essas falhas posteriormente para que a manutenção seja cirúrgica e não destrutiva.
 
 ---
 
@@ -50,8 +50,9 @@ Através do schema do **Pydantic v2**, cada `ScrapedRecord` é garantido contra 
 | Decisão | Motivação | Trade-off / Preço Pago |
 |---|---|---|
 | **Plugins por domínio** | Isola as inevitáveis quebras de HTML frequentes de cada site, limitando o raio de ação. | A complexidade horizontal cresce; cada novo domínio exige sua própria função de parsing registrada. |
-| **Playwright primeiro, depois HTTP** | Assegura que páginas dinâmicas ou blindadas tragam o DOM completo de primeira. | O navegador consome mais memória e recursos computacionais, sacrificando performance bruta extrema. |
+| **Política de transporte por plugin** | Permite que cada domínio escolha entre renderização e HTTP direto, mantendo precisão sem desperdiçar recursos. | O contrato do plugin precisa declarar corretamente a necessidade de JavaScript. |
 | **Preservar registros com falhas** | Um erro em um nó não invalida um lote demorado. Mantém o pipeline de dados limpo para posterior reprocessamento/auditoria. | O dataset final pode incluir valores nulos em colunas essenciais se ignorados, forçando o uso de `comps validate`. |
+| **Jobs, cache e manifesto opcionais** | Coletas longas podem ser retomadas e comparadas sem tornar obrigatória uma infraestrutura externa. | O usuário precisa escolher um `--job-dir` quando quiser persistência entre execuções. |
 | **Fixtures HTML sintéticas para os testes** | Os testes rodam 100% offline, de forma rápida, previsível, e livre de problemas de rede. | Testes não falharão se o site real for redesenhado; os mocks exigem testes rotineiros complementares no "mundo real". |
 
 ---
@@ -62,9 +63,10 @@ Através do schema do **Pydantic v2**, cada `ScrapedRecord` é garantido contra 
 | :--- | :--- | :--- |
 | **Linguagem & Contratos** | Python 3.11+ / Pydantic v2 | Base com *Type Hints* rígidos e validação no tempo de execução. |
 | **CLI & UX** | Typer + Rich | CLI imersiva e tipada; terminal colorido com diagnóstico de pipeline. |
-| **Rede & Scrape** | Playwright / HTTPX / Tenacity | Camadas redundantes e retry com backoff contra WAF e Timeouts. |
+| **Rede & Scrape** | Playwright / HTTPX / Tenacity | Política por plugin, retry com backoff, limites por domínio e `robots.txt`. |
 | **Parsing** | BeautifulSoup 4 / Lógica Híbrida | Extração por JSON-LD, metatags, variáveis `__NEXT_DATA__` e CSS. |
 | **Data Engineering** | Pandas + PyArrow | Escrita tabular eficiente (Parquet, SQLite, CSV, JSON Lines). |
+| **Estado & Extensão** | SQLite / entry points / JSON | Retomada opcional, plugins externos e manifesto auditável por execução. |
 | **Qualidade & CI** | Pytest / Ruff / Github Actions | Uma extensa e veloz suíte de testes (offline) validando contratos continuamente. |
 
 ---
@@ -73,18 +75,23 @@ Através do schema do **Pydantic v2**, cada `ScrapedRecord` é garantido contra 
 
 ```mermaid
 flowchart TD
-    A[Usuário: comps scrape URL] --> B[Downloader Adaptativo]
-    B -->|Tentativa 1: Playwright| C{Valid HTML?}
-    C -- Erro / Timeout --> D[Tentativa 2: httpx Fallback]
-    D --> E[Registry / Despachante]
-    C -- Sucesso --> E
-    E -->|Identifica Domínio| F[Plugin Específico]
-    F -->|Extrai Dados| G[ScrapedRecord / Pydantic]
-    G --> H[Auditoria Falhas vs Qualidade]
-    H --> I[Gravação: Parquet / SQLite / JSON]
+    A[Usuário: comps scrape URL] --> B[Deduplicação e Job opcional]
+    B --> C[Política robots.txt e limite por domínio]
+    C --> D[Downloader conforme política do plugin]
+    D -->|browser_first ou browser_only| E[Playwright]
+    D -->|httpx_first ou httpx_only| F[HTTPX]
+    E --> G{HTML válido?}
+    F --> G
+    G --> H[Registry / Despachante]
+    H -->|Identifica Domínio| I[Plugin Específico]
+    I -->|Extrai Dados| J[ScrapedRecord / Pydantic]
+    J --> K[Auditoria Falhas vs Qualidade]
+    K --> L[Gravação: Parquet / SQLite / JSON]
+    K --> M[Manifesto *.run.json]
 ```
 
 ## Próximos Passos (Uso)
 
 - Se você quer entender como instalar, rodar e exportar na linha de comando, acesse o passo a passo completo no [**DIDATICO.md**](DIDATICO.md).
 - Se sua intenção for criar um módulo de extração para o seu próprio site de interesse, acesse o [**Tutorial de Criação de Plugins**](docs/writing-a-plugin.md).
+- Se precisar interromper e retomar uma coleta ou instalar plugins fora deste repositório, consulte o [**Guia de Plugins e Execuções**](docs/writing-a-plugin.md).

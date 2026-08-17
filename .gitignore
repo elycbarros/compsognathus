@@ -3,6 +3,7 @@ data/html/
 data/output/
 *.parquet
 *.csv
+*.run.json
 
 # Ambientes virtuais
 .venv/

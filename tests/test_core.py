@@ -5,8 +5,20 @@ import sqlite3
 from contextlib import closing
 import pandas as pd
 import pytest
+from pydantic import BaseModel
 from compsognathus.core.record import ScrapedRecord
-from compsognathus.core.registry import PluginRegistration, _REGISTRY, get_parser, get_schema, list_plugins, register
+from compsognathus.core.registry import (
+    PluginRegistration,
+    _REGISTRY,
+    get_download_policy,
+    get_model,
+    get_parser,
+    get_schema,
+    load_external_plugins,
+    list_plugins,
+    register,
+)
+from compsognathus.downloader import DownloadPolicy
 from compsognathus.scraper import export_dataframe
 
 
@@ -109,6 +121,19 @@ class TestRegistry:
         assert registration.parser is _parse_nomeado
         assert registration.schema == ("titulo",)
 
+    def test_registro_aceita_modelo_e_politica(self):
+        class Produto(BaseModel):
+            titulo: str
+
+        policy = DownloadPolicy(preferred="httpx_only")
+
+        @register("contrato-v14.com", model=Produto, download_policy=policy)
+        def _parse_contrato(html, url):
+            return ScrapedRecord(url=url, site="contrato")
+
+        assert get_model("https://contrato-v14.com/item") is Produto
+        assert get_download_policy("https://contrato-v14.com/item") is policy
+
     @pytest.mark.parametrize(
         "url",
         [
@@ -133,6 +158,33 @@ class TestRegistry:
         for p in plugins:
             assert "domain" in p
             assert "schema" in p
+
+    def test_carrega_plugin_por_entry_point(self, monkeypatch):
+        import compsognathus.core.registry as registry
+
+        domain = "entry-point-v16.example"
+
+        def register_external():
+            @register(domain, schema=["titulo"])
+            def parse_external(html, url):
+                return ScrapedRecord(url=url, site="external")
+
+        class EntryPoint:
+            name = "plugin-demo"
+            dist = type("Dist", (), {"version": "2.0.0"})()
+
+            def load(self):
+                return register_external
+
+        monkeypatch.setattr(registry, "_EXTERNAL_LOADED", False)
+        monkeypatch.setattr(registry.metadata, "entry_points", lambda: [EntryPoint()])
+
+        assert load_external_plugins() == []
+        assert get_parser(f"https://{domain}/item").__name__ == "parse_external"
+        plugin = next(item for item in list_plugins() if item["domain"] == domain)
+        assert plugin["source"] == "entry-point:plugin-demo"
+        assert plugin["version"] == "2.0.0"
+        registry._REGISTRY.pop(domain, None)
 
 
 # ── Testes de Exportação Multi-Formato ────────────────────────────────────────

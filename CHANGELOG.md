@@ -13,6 +13,18 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - A validação de schema trata `NaN` como campo ausente, preservando a confiabilidade de `parse_ok`.
 - `DownloadResult.size_bytes` e os logs de download agora medem o tamanho UTF-8 real, em vez da quantidade de caracteres.
 
+### Adicionado
+- Plugins podem declarar modelos Pydantic opcionais para validar e normalizar campos extraídos.
+- Políticas de download por domínio (`httpx_first`, `browser_first`, `httpx_only` e `browser_only`), com timeout, espera e cabeçalhos configuráveis.
+- Reutilização de clientes HTTP e sessões do navegador durante lotes concorrentes.
+- Metadados de download com status HTTP, URL final, duração, tentativas e tipo de erro.
+- `--job-dir` e `--resume` para persistir e retomar coletas com SQLite.
+- Deduplicação de URLs e cache opcional de HTML (`--cache-html` / `--force`).
+- Limite de concorrência e atraso por domínio, com ajuste para erros e `Retry-After`.
+- Política explícita de `robots.txt` (`--robots respect|ignore`), com recusas auditáveis.
+- Descoberta de plugins externos pelo grupo de entry points `compsognathus.plugins`, com origem, versão e conflitos diagnosticáveis.
+- Manifesto lateral `*.run.json` com duração, configuração, contagens, métodos, status HTTP, erros e plugins utilizados.
+
 ### Documentação
 - Documentação inteiramente revisada para centralizar o `README.md` como entrada rápida executiva, transferindo a carga didática integralmente para `DIDATICO.md` e a carga arquitetural profunda para `O_QUE_SOU.md`.
 - Esclarecimento na hierarquia do downloader corrigido nos diagramas para afirmar que `Playwright` é a primeira camada, servindo `httpx` como fallback resiliente.

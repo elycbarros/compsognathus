@@ -13,10 +13,14 @@ Ele deixa o trabalho repetitivo — tratar erros de rede, gerenciar retentativas
 ## Capacidades Principais
 
 - **Despacho dinâmico**: Plugins registrados por domínio, invocados automaticamente pela URL de origem.
-- **Download resiliente**: Usa Playwright (Chromium) em primeiro lugar para renderizar JavaScript e lidar com WAFs simples, e HTTPX como fallback. Inclui *exponential backoff* nativo contra limites de requisições.
+- **Download resiliente e configurável**: Cada plugin pode escolher entre HTTPX e Playwright, definir timeouts e cabeçalhos, e reutilizar recursos durante o lote. Inclui *exponential backoff* nativo contra limites de requisições.
 - **Extração limpa**: Foco em JSON-LD, payloads estruturados (como Next.js) e por último seletores CSS.
-- **Validação de esquema**: O contrato de extração é checado com Pydantic v2 (capturando quebras silenciosas no layout do alvo).
+- **Validação de esquema**: O contrato de extração é checado por campos obrigatórios e, quando declarado pelo plugin, por um modelo tipado do Pydantic v2.
 - **Trilha de auditoria**: Falhas de download ou extração não descartam o dataset, mas são preservadas para diagnóstico (`comps validate`).
+- **Execuções recuperáveis**: `--job-dir` persiste o progresso, permite `--resume`, reutiliza HTMLs e registra recusas por `robots.txt`.
+- **Controle responsável**: Concorrência e atraso podem ser limitados por domínio, com ajuste após erros e suporte a `Retry-After`.
+- **Ecossistema extensível**: Plugins externos podem ser instalados como pacotes Python via entry points.
+- **Manifesto de execução**: Cada coleta gera um `*.run.json` com configuração, métricas, plugins e erros resumidos.
 - **Múltiplos Formatos**: Exportação embarcada para Parquet (padrão), CSV, JSON, JSONL e banco SQLite.
 
 ## Validação e Testes
@@ -58,6 +62,10 @@ Você pode utilizar a concorrência e escolher diferentes saídas:
 
 ```bash
 comps scrape links.txt --format sqlite --output dados.db --concurrency 3
+
+# Coleta recuperável, com cache e retomada após interrupções
+comps scrape links.txt --job-dir .jobs/minha-coleta
+comps scrape links.txt --job-dir .jobs/minha-coleta --resume
 ```
 
 ## Documentação Completa

@@ -9,12 +9,27 @@ sem bloqueios de WAF ou rate-limiting agressivo.
 """
 import re
 from bs4 import BeautifulSoup
+from pydantic import BaseModel, ConfigDict
 
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
+from compsognathus.downloader import DownloadPolicy
 
 # Mapeamento de palavras de avaliação para valores numéricos
 RATING_MAP = {"One": 1.0, "Two": 2.0, "Three": 3.0, "Four": 4.0, "Five": 5.0}
+
+
+class BookSchema(BaseModel):
+    """Contrato tipado dos campos extraídos do livro."""
+
+    model_config = ConfigDict(extra="allow")
+
+    titulo: str
+    preco: float
+    avaliacao: float
+    disponibilidade: bool
+    upc: str | None = None
+    categoria: str | None = None
 
 
 def _clean_price(text: str) -> float | None:
@@ -26,7 +41,12 @@ def _clean_price(text: str) -> float | None:
         return None
 
 
-@register("books.toscrape.com", schema=["titulo", "preco", "avaliacao", "disponibilidade"])
+@register(
+    "books.toscrape.com",
+    schema=["titulo", "preco", "avaliacao", "disponibilidade"],
+    model=BookSchema,
+    download_policy=DownloadPolicy(preferred="httpx_first", wait_after_load_ms=0),
+)
 def parse(html: str, url: str) -> ScrapedRecord:
     """Parser para books.toscrape.com - extrai detalhes de livro."""
     soup = BeautifulSoup(html, "html.parser")

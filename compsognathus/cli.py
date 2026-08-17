@@ -5,7 +5,7 @@ Comandos disponíveis:
     comps scrape        — baixa URLs e exporta dados (Parquet, CSV, JSON, JSONL, SQLite)
     comps report        — exibe estatísticas e gera relatório HTML visual
     comps validate      — diagnostica qualidade e falhas de um dataset
-    comps plugins list  — lista plugins registrados e seus schemas
+    comps plugins list  — lista plugins registrados, contratos e origem
     comps plugins new   — gera boilerplate para um novo plugin
 """
 from __future__ import annotations
@@ -83,7 +83,9 @@ def _read_urls(source: str) -> list[str]:
         console.print(f"[red]❌ URL(s) inválida(s): {', '.join(invalid[:3])}[/red]")
         raise typer.Exit(1)
 
-    return urls
+    # Duplicatas não representam trabalho adicional e tornam o relatório
+    # ambíguo; preservamos a primeira ocorrência e sua ordem.
+    return list(dict.fromkeys(urls))
 
 
 # ── Comando: scrape ───────────────────────────────────────────────────────────
@@ -94,6 +96,13 @@ def scrape(
     output: Path = typer.Option(Path("output.parquet"), "--output", "-o", help="Arquivo de saída (parquet, csv, json, jsonl, sqlite)."),
     fmt: str = typer.Option("parquet", "--format", "-f", help="Formato: 'parquet', 'csv', 'json', 'jsonl', 'sqlite'."),
     concurrency: int = typer.Option(1, "--concurrency", "-c", min=1, help="Número de downloads simultâneos em paralelo."),
+    domain_concurrency: int = typer.Option(1, "--domain-concurrency", min=1, help="Máximo de downloads simultâneos por domínio."),
+    domain_delay: float = typer.Option(1.0, "--domain-delay", min=0.0, help="Intervalo mínimo entre requisições do mesmo domínio."),
+    job_dir: Optional[Path] = typer.Option(None, "--job-dir", help="Diretório persistente para retomar a coleta."),
+    resume: bool = typer.Option(False, "--resume", help="Retoma um job existente no diretório informado."),
+    cache_html: bool = typer.Option(False, "--cache-html", help="Reutiliza HTMLs já salvos no diretório de HTML."),
+    force: bool = typer.Option(False, "--force", help="Ignora HTMLs em cache e baixa novamente."),
+    robots: str = typer.Option("respect", "--robots", help="Política robots.txt: respect ou ignore."),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Exibe logs detalhados."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Valida URLs e plugins disponíveis sem realizar downloads."),
 ) -> None:
@@ -103,6 +112,7 @@ def scrape(
         comps scrape links.txt --output dados.parquet
         comps scrape links.txt --format jsonl --output dados.jsonl
         comps scrape links.txt --format sqlite --output banco.db --concurrency 3
+        comps scrape links.txt --job-dir .jobs/coleta --resume
         comps scrape links.txt --dry-run
     """
     _setup_logging(verbose)
@@ -113,6 +123,14 @@ def scrape(
     import compsognathus.plugins  # noqa: F401
 
     urls = _read_urls(source)
+
+    robots = robots.lower().strip()
+    if robots not in {"respect", "ignore"}:
+        console.print("[red]❌ --robots deve ser 'respect' ou 'ignore'.[/red]")
+        raise typer.Exit(1)
+    if resume and job_dir is None:
+        console.print("[red]❌ --resume exige --job-dir.[/red]")
+        raise typer.Exit(1)
 
     known_suffixes = {
         ".parquet": "parquet",
@@ -172,13 +190,34 @@ def scrape(
         def _on_progress(current: int, total: int, msg: str) -> None:
             progress.update(task, completed=current, description=msg[:60])
 
-        df = _scrape(
-            urls,
-            output_path=output,
-            fmt=fmt,
-            concurrency=concurrency,
-            progress_callback=_on_progress,
-        )
+        scrape_kwargs = {
+            "job_dir": job_dir,
+            "resume": resume,
+            "cache_html": cache_html,
+            "force": force,
+            "robots_mode": robots.lower().strip(),
+            "domain_concurrency": domain_concurrency,
+            "domain_delay": domain_delay,
+        }
+        try:
+            df = _scrape(
+                urls,
+                output_path=output,
+                fmt=fmt,
+                concurrency=concurrency,
+                progress_callback=_on_progress,
+                **scrape_kwargs,
+            )
+        except TypeError as exc:
+            if "unexpected keyword" not in str(exc):
+                raise
+            df = _scrape(
+                urls,
+                output_path=output,
+                fmt=fmt,
+                concurrency=concurrency,
+                progress_callback=_on_progress,
+            )
 
     if df.empty:
         console.print("[red]Nenhum dado extraído.[/red]")
@@ -187,6 +226,8 @@ def scrape(
     ok = df["parse_ok"].sum() if "parse_ok" in df.columns else len(df)
     console.print(f"\n[green]✅ Concluído![/green] {ok}/{len(df)} registros com sucesso")
     console.print(f"[dim]Exportado para: {output} (formato: {fmt})[/dim]\n")
+    manifest_file = output.with_name(f"{output.stem}.run.json")
+    console.print(f"[dim]Manifesto: {manifest_file}[/dim]\n")
 
     _print_preview(df, max_rows=5)
 
@@ -260,6 +301,9 @@ def report(
         comps report dados.parquet
         comps report dados.parquet --html relatorio.html
     """
+    import json
+    import pandas as pd
+
     try:
         df = load_dataframe(file)
     except Exception as exc:
@@ -270,14 +314,36 @@ def report(
 
     total = len(df)
     parse_ok = quality_bool_series(df, "parse_ok", True)
+    download_ok = quality_bool_series(df, "download_ok", True)
     ok = int(parse_ok.sum())
     sites = df["site"].unique().tolist() if "site" in df.columns else []
+    manifest_path = file.with_name(f"{file.stem}.run.json")
+    manifest = None
+    if manifest_path.exists():
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            console.print(f"[yellow]⚠️ Manifesto inválido ignorado: {manifest_path.name}[/yellow]")
 
     metrics = Table(show_header=False, box=None, padding=(0, 2))
     metrics.add_row("Total de registros", str(total))
     metrics.add_row("Registros completos", f"{ok}/{total} ({ok/total*100:.0f}%)" if total > 0 else "0/0")
+    metrics.add_row("Downloads concluídos", f"{int(download_ok.sum())}/{total}" if total > 0 else "0/0")
     metrics.add_row("Sites coletados", ", ".join(str(s) for s in sites))
     metrics.add_row("Colunas", str(len(df.columns)))
+    if "download_duration_seconds" in df.columns:
+        durations = pd.to_numeric(df["download_duration_seconds"], errors="coerce").dropna()
+        if not durations.empty:
+            metrics.add_row("Duração média do download", f"{durations.mean():.2f}s")
+    if "download_status_code" in df.columns:
+        statuses = df["download_status_code"].dropna().astype(str).value_counts()
+        if not statuses.empty:
+            metrics.add_row("Status HTTP", ", ".join(f"{code}: {count}" for code, count in statuses.items()))
+    if manifest:
+        metrics.add_row("Execução", f"{manifest.get('duration_seconds', 0):.2f}s")
+        counts = manifest.get("counts", {})
+        metrics.add_row("Cache hits", str(counts.get("cache_hits", 0)))
+        metrics.add_row("Robots recusados", str(counts.get("robots_denied", 0)))
     console.print(metrics)
 
     numeric_cols = df.select_dtypes(include="number").columns
@@ -305,7 +371,7 @@ def report(
 
     # Exportação HTML se solicitada
     if html_out:
-        _export_html_report(df, file.name, html_out)
+        _export_html_report(df, file.name, html_out, manifest=manifest)
         console.print(f"\n[green]✨ Relatório HTML gerado em:[/green] {html_out}\n")
 
 
@@ -314,7 +380,7 @@ def report(
 @plugins_app.command("list")
 def plugins_list() -> None:
     """Lista todos os plugins registrados e seus campos."""
-    from compsognathus.core.registry import list_plugins
+    from compsognathus.core.registry import external_plugin_errors, list_plugins
     import compsognathus.plugins  # noqa: F401
 
     plugins = list_plugins()
@@ -328,9 +394,15 @@ def plugins_list() -> None:
     table.add_column("Descrição", style="dim")
 
     for p in plugins:
-        table.add_row(p["domain"], p["schema"], p["description"])
+        metadata = f"modelo={p['model']} • download={p['download']} • {p['source']}"
+        table.add_row(p["domain"], p["schema"], f"{metadata}\n{p['description']}")
 
     console.print(table)
+    errors = external_plugin_errors()
+    if errors:
+        console.print("\n[yellow]Plugins externos com erro:[/yellow]")
+        for error in errors:
+            console.print(f"[yellow]• {error}[/yellow]")
     console.print(f"\n[dim]Total: {len(plugins)} plugin(s) • Para criar um novo: comps plugins new <dominio>[/dim]\n")
 
 
@@ -495,7 +567,7 @@ def _print_preview(df, max_rows: int = 5) -> None:
     """Exibe as primeiras linhas do DataFrame como tabela no terminal."""
     import pandas as pd
 
-    priority_cols = ["site", "url", "parse_ok"]
+    priority_cols = ["site", "url", "parse_ok", "download_ok", "download_status_code", "download_duration_seconds"]
     other_cols = [c for c in df.columns if c not in priority_cols and c not in ("data_coleta", "parse_errors")]
     display_cols = priority_cols + other_cols[:6]
     display_cols = [c for c in display_cols if c in df.columns]
@@ -519,7 +591,7 @@ def _print_preview(df, max_rows: int = 5) -> None:
     console.print(table)
 
 
-def _export_html_report(df, filename: str, output_path: Path) -> None:
+def _export_html_report(df, filename: str, output_path: Path, manifest: dict | None = None) -> None:
     """Gera um relatório HTML visual em página única auto-contida."""
     total = len(df)
     ok_count = int(quality_bool_series(df, "parse_ok", True).sum())
@@ -564,6 +636,8 @@ def _export_html_report(df, filename: str, output_path: Path) -> None:
             <div class="metric"><div>Total de Registros</div><div class="val">{total}</div></div>
             <div class="metric"><div>Taxa de Sucesso</div><div class="val">{taxa_ok:.1f}%</div></div>
             <div class="metric"><div>Total de Colunas</div><div class="val">{len(df.columns)}</div></div>
+            {f'<div class="metric"><div>Duração da Execução</div><div class="val">{manifest.get("duration_seconds", 0):.2f}s</div></div>' if manifest else ''}
+            {f'<div class="metric"><div>Cache Hits</div><div class="val">{manifest.get("counts", {}).get("cache_hits", 0)}</div></div>' if manifest else ''}
         </div>
     </div>
     <div class="card">
