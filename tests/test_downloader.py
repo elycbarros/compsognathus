@@ -289,3 +289,56 @@ def test_try_playwright_fecha_browser(monkeypatch):
     assert _try_playwright("https://example.com/item") == VALID_HTML
     assert state["goto"] == "https://example.com/item"
     assert state["closed"] is True
+
+
+def test_download_policy_stealth_options():
+    p1 = DownloadPolicy(preferred="stealth_browser", stealth=True)
+    assert p1.preferred == "stealth_browser"
+    assert p1.stealth is True
+
+    p2 = DownloadPolicy(preferred="stealth_http")
+    assert p2.preferred == "stealth_http"
+
+    with pytest.raises(ValueError, match="Estratégia de download inválida"):
+        DownloadPolicy(preferred="invalid_strategy")  # type: ignore
+
+
+def test_download_url_stealth_browser(tmp_path: Path, monkeypatch):
+    calls = []
+
+    def fake_playwright(url, policy=None, reuse=False, stealth=False):
+        calls.append((url, stealth))
+        return VALID_HTML
+
+    monkeypatch.setattr("compsognathus.downloader._try_playwright", fake_playwright)
+
+    result = download_url(
+        "https://example.com/stealth",
+        tmp_path,
+        DownloadPolicy(preferred="stealth_browser"),
+    )
+
+    assert result.ok is True
+    assert result.method == "stealth_browser"
+    assert calls == [("https://example.com/stealth", True)]
+
+
+def test_download_url_stealth_http(tmp_path: Path, monkeypatch):
+    calls = []
+
+    def fake_httpx(url, policy=None, reuse=False, stealth=False):
+        calls.append((url, stealth))
+        return VALID_HTML
+
+    monkeypatch.setattr("compsognathus.downloader._try_httpx", fake_httpx)
+
+    result = download_url(
+        "https://example.com/stealth-http",
+        tmp_path,
+        DownloadPolicy(preferred="stealth_http"),
+    )
+
+    assert result.ok is True
+    assert result.method == "stealth_http"
+    assert calls == [("https://example.com/stealth-http", True)]
+

@@ -47,6 +47,45 @@ _HTTPX_HEADERS = {
     "Referer": "https://www.google.com/",
 }
 
+_STEALTH_HTTP_HEADERS = {
+    "User-Agent": _USER_AGENT,
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7",
+    "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Sec-Ch-Ua": '"Chromium";v="124", "Google Chrome";v="124", "Not-A.Brand";v="99"',
+    "Sec-Ch-Ua-Mobile": "?0",
+    "Sec-Ch-Ua-Platform": '"macOS"',
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+    "Upgrade-Insecure-Requests": "1",
+    "Referer": "https://www.google.com/",
+}
+
+_STEALTH_JS_INIT = """
+// Anti-bot evasion: remove navigator.webdriver
+Object.defineProperty(navigator, 'webdriver', {
+    get: () => undefined,
+});
+
+// Mock plugins and languages
+Object.defineProperty(navigator, 'languages', {
+    get: () => ['pt-BR', 'pt', 'en-US', 'en'],
+});
+
+Object.defineProperty(navigator, 'plugins', {
+    get: () => [1, 2, 3, 4, 5],
+});
+
+// Mock chrome object
+window.chrome = window.chrome || {
+    runtime: {},
+    loadTimes: function() {},
+    csi: function() {},
+    app: {},
+};
+"""
+
 
 @dataclass(frozen=True)
 class DownloadPolicy:
@@ -54,15 +93,21 @@ class DownloadPolicy:
 
     ``browser_first`` mantém o comportamento histórico do projeto. Plugins
     de páginas estáticas podem optar por ``httpx_first`` ou ``httpx_only``.
+    Plugins com proteção anti-bot podem optar por ``stealth_browser`` ou ``stealth_http``.
     """
 
-    preferred: Literal["httpx_first", "browser_first", "httpx_only", "browser_only"] = "browser_first"
+    preferred: Literal[
+        "httpx_first", "browser_first", "httpx_only", "browser_only", "stealth_browser", "stealth_http"
+    ] = "browser_first"
     timeout_seconds: float = 15.0
     wait_after_load_ms: int = 1_500
     headers: dict[str, str] | None = None
+    stealth: bool = False
 
     def __post_init__(self) -> None:
-        if self.preferred not in {"httpx_first", "browser_first", "httpx_only", "browser_only"}:
+        if self.preferred not in {
+            "httpx_first", "browser_first", "httpx_only", "browser_only", "stealth_browser", "stealth_http"
+        }:
             raise ValueError(f"Estratégia de download inválida: {self.preferred!r}")
         if self.timeout_seconds <= 0:
             raise ValueError("timeout_seconds deve ser maior que zero")
@@ -256,19 +301,21 @@ def _is_valid_html(html: str) -> bool:
     return True
 
 
-def _policy_headers(policy: DownloadPolicy | None) -> dict[str, str]:
-    headers = dict(_HTTPX_HEADERS)
+def _policy_headers(policy: DownloadPolicy | None, stealth: bool = False) -> dict[str, str]:
+    use_stealth = stealth or (policy is not None and (policy.stealth or policy.preferred in ("stealth_browser", "stealth_http")))
+    base = _STEALTH_HTTP_HEADERS if use_stealth else _HTTPX_HEADERS
+    headers = dict(base)
     if policy and policy.headers:
         headers.update(policy.headers)
     return headers
 
 
-def _get_httpx_client(policy: DownloadPolicy | None, http2: bool):
+def _get_httpx_client(policy: DownloadPolicy | None, http2: bool, stealth: bool = False):
     """Obtém um cliente HTTP reutilizável por thread e configuração."""
     import httpx
 
     timeout_seconds = policy.timeout_seconds if policy else 15.0
-    headers = _policy_headers(policy)
+    headers = _policy_headers(policy, stealth=stealth)
     key = _HttpxClientKey(
         thread_id=threading.get_ident(),
         http2=http2,
@@ -353,6 +400,7 @@ def _try_playwright(
     policy: DownloadPolicy | None = None,
     *,
     reuse: bool = False,
+    stealth: bool = False,
 ) -> str:
     """Abre a URL com Chromium headless e flags stealth. Retorna o HTML renderizado."""
     from playwright.sync_api import TimeoutError as PWTimeout
@@ -360,6 +408,8 @@ def _try_playwright(
     logger.debug("Playwright: abrindo %s", url)
     timeout_ms = int((policy.timeout_seconds if policy else 15.0) * 1000)
     wait_ms = policy.wait_after_load_ms if policy else 1_500
+    use_stealth = stealth or (policy is not None and (policy.stealth or policy.preferred == "stealth_browser"))
+
     if reuse:
         browser = _get_playwright_browser()
         context = browser.new_context(
@@ -369,6 +419,8 @@ def _try_playwright(
         )
         try:
             page = context.new_page()
+            if use_stealth:
+                page.add_init_script(_STEALTH_JS_INIT)
             page.set_default_navigation_timeout(timeout_ms)
             if policy and policy.headers:
                 page.set_extra_http_headers(policy.headers)
@@ -408,6 +460,8 @@ def _try_playwright(
                 locale="pt-BR",
             )
             page = context.new_page()
+            if use_stealth:
+                page.add_init_script(_STEALTH_JS_INIT)
             page.set_default_navigation_timeout(timeout_ms)
             if policy and policy.headers:
                 page.set_extra_http_headers(policy.headers)
@@ -430,7 +484,7 @@ def _try_playwright(
             browser.close()
 
 
-# ── Transporte HTTPX (com fallback conforme a política) ─────────────────────
+# ── Transporte HTTPX / Stealth HTTP (com fallback conforme a política) ───────
 
 @retry(
     retry=retry_if_exception_type(Exception),
@@ -444,12 +498,42 @@ def _try_httpx(
     policy: DownloadPolicy | None = None,
     *,
     reuse: bool = False,
+    stealth: bool = False,
 ) -> str:
     """Fallback HTTP — tenta HTTP/2 primeiro, depois HTTP/1.1."""
     import httpx
 
-    logger.debug("httpx: baixando %s", url)
+    use_stealth = stealth or (policy is not None and (policy.stealth or policy.preferred == "stealth_http"))
+    logger.debug("httpx: baixando %s (stealth=%s)", url, use_stealth)
     timeout_seconds = policy.timeout_seconds if policy else 15.0
+    headers = _policy_headers(policy, stealth=use_stealth)
+
+    # Tentativa opcional via curl_cffi para TLS fingerprint impersonation real
+    if use_stealth:
+        try:
+            from curl_cffi import requests as cffi_requests
+            cffi_resp = cffi_requests.get(
+                url,
+                headers=headers,
+                timeout=timeout_seconds,
+                impersonate="chrome120",
+            )
+            _set_fetch_metadata(
+                status_code=getattr(cffi_resp, "status_code", None),
+                final_url=str(getattr(cffi_resp, "url", url)),
+                retry_after_seconds=_retry_after(getattr(cffi_resp, "headers", {})),
+            )
+            cffi_resp.raise_for_status()
+            html = cffi_resp.text
+            if not _is_valid_html(html):
+                raise ValueError("HTML inválido ou bloqueado por WAF")
+            logger.debug("curl_cffi/stealth: OK (%d KB) — %s", _html_size_bytes(html) // 1024, url)
+            return html
+        except ImportError:
+            pass
+        except Exception as exc:
+            logger.debug("curl_cffi falhou (%s), tentando fallback com httpx...", exc)
+
     timeout = httpx.Timeout(
         connect=min(5.0, timeout_seconds),
         read=timeout_seconds,
@@ -460,7 +544,7 @@ def _try_httpx(
     html = None
     try:
         if reuse:
-            client = _get_httpx_client(policy, http2=True)
+            client = _get_httpx_client(policy, http2=True, stealth=use_stealth)
             response = client.get(url)
             _set_fetch_metadata(
                 status_code=getattr(response, "status_code", None),
@@ -470,7 +554,7 @@ def _try_httpx(
             response.raise_for_status()
             html = response.text
         else:
-            with httpx.Client(headers=_policy_headers(policy), timeout=timeout, follow_redirects=True, http2=True) as client:
+            with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True, http2=True) as client:
                 response = client.get(url)
                 _set_fetch_metadata(
                     status_code=getattr(response, "status_code", None),
@@ -483,7 +567,7 @@ def _try_httpx(
     except Exception as exc:
         logger.debug("httpx h2 falhou (%s), tentando HTTP/1.1...", exc)
         if reuse:
-            client = _get_httpx_client(policy, http2=False)
+            client = _get_httpx_client(policy, http2=False, stealth=use_stealth)
             response = client.get(url)
             _set_fetch_metadata(
                 status_code=getattr(response, "status_code", None),
@@ -493,7 +577,7 @@ def _try_httpx(
             response.raise_for_status()
             html = response.text
         else:
-            with httpx.Client(headers=_policy_headers(policy), timeout=timeout, follow_redirects=True, http2=False) as client:
+            with httpx.Client(headers=headers, timeout=timeout, follow_redirects=True, http2=False) as client:
                 response = client.get(url)
                 _set_fetch_metadata(
                     status_code=getattr(response, "status_code", None),
@@ -555,13 +639,44 @@ def download_url(
         "httpx_first": ("httpx", "playwright"),
         "httpx_only": ("httpx",),
         "browser_only": ("playwright",),
+        "stealth_browser": ("stealth_browser", "httpx"),
+        "stealth_http": ("stealth_http", "playwright"),
     }[preferred]
 
     def _fetch(method: str) -> str:
-        fn = _try_playwright if method == "playwright" else _try_httpx
-        if policy is None and not reuse_resources:
-            return fn(url)
-        return fn(url, policy, reuse=reuse_resources)
+        if method in ("playwright", "stealth_browser"):
+            is_stealth = (method == "stealth_browser") or (policy is not None and policy.stealth)
+            fn = _try_playwright
+            if policy is None and not reuse_resources and not is_stealth:
+                try:
+                    return fn(url)
+                except TypeError:
+                    pass
+            try:
+                return fn(url, policy, reuse=reuse_resources, stealth=is_stealth)
+            except TypeError as exc:
+                if "stealth" in str(exc) or "unexpected keyword" in str(exc) or "positional argument" in str(exc):
+                    if policy is None and not reuse_resources:
+                        return fn(url)
+                    return fn(url, policy, reuse=reuse_resources)
+                raise
+        elif method in ("httpx", "stealth_http"):
+            is_stealth = (method == "stealth_http") or (policy is not None and policy.stealth)
+            fn = _try_httpx
+            if policy is None and not reuse_resources and not is_stealth:
+                try:
+                    return fn(url)
+                except TypeError:
+                    pass
+            try:
+                return fn(url, policy, reuse=reuse_resources, stealth=is_stealth)
+            except TypeError as exc:
+                if "stealth" in str(exc) or "unexpected keyword" in str(exc) or "positional argument" in str(exc):
+                    if policy is None and not reuse_resources:
+                        return fn(url)
+                    return fn(url, policy, reuse=reuse_resources)
+                raise
+        raise ValueError(f"Método de download desconhecido: {method}")
 
     errors: dict[str, Exception] = {}
     failure_metadata: dict[str, object] = {}
@@ -640,6 +755,7 @@ def download_all(
     """
     if concurrency < 1:
         raise ValueError("concurrency deve ser maior ou igual a 1")
+    output_dir.mkdir(parents=True, exist_ok=True)
     limiter = DomainRateLimiter(domain_concurrency, domain_delay)
     robots = RobotsChecker(robots_mode)
 

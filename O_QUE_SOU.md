@@ -30,18 +30,20 @@ Para entender este repositório sob a ótica de engenharia de software e arquite
 
 Em vez de um grande monolito (com múltiplos `if/else`), cada site suportado é isolado. O framework utiliza anotações (`@register`) para vincular uma função a um domínio. No momento da execução, a engine extrai a base da URL e despacha o parsing dinamicamente para a estratégia correta, mantendo desacoplamento total. Plugins podem ser bundled no pacote ou descobertos por entry points Python, sem mudar o fluxo principal.
 
-### 2. Resiliência de Download (política por plugin)
+### 2. Resiliência de Download e Evasão Stealth (política por plugin)
 
 O transporte é escolhido pelo plugin conforme a necessidade do domínio, preservando o caminho histórico como padrão:
 
 - **`browser_first` / `browser_only`:** Renderiza o Chromium Headless quando a página depende de JavaScript.
 - **`httpx_first` / `httpx_only`:** Usa HTTP direto quando HTML ou JSON-LD estático é suficiente, evitando custo desnecessário.
-- **Resiliência comum:** Tenacity, cache opcional, limites por domínio, respeito a `Retry-After` e validação contra páginas de bloqueio.
+- **`stealth_browser` / `stealth_http`:** Ativa técnicas de evasão anti-detecção (ocultação de `navigator.webdriver`, emulação de hardware/plugins e camuflagem TLS) para portais com defesas anti-bot rígidas.
+- **Resiliência comum:** Tenacity com backoff exponencial, cache opcional, limites por domínio, respeito a `Retry-After` e validação contra páginas de bloqueio.
 
-### 3. Validação e Qualidade de Dados Imediata
+### 3. Validação, Qualidade e Parsing Adaptativo
 
 Não confiamos em scrapings silenciosos que retornam *None*.
-Através dos campos obrigatórios e, quando declarado, de um modelo tipado do **Pydantic v2**, cada `ScrapedRecord` é verificado contra o contrato. Se a árvore DOM ou a API subjacente do alvo mudar misteriosamente, a função não joga o dataset no lixo de vez: ela encerra as colunas corrompidas com uma *parse_error* preservando o dado incompleto. O comando `comps validate` pode investigar essas falhas posteriormente para que a manutenção seja cirúrgica e não destrutiva.
+- **Contratos Fortes com Pydantic v2**: Cada `ScrapedRecord` é checado. Se a estrutura falhar, o erro é isolado em `parse_errors` para diagnóstico sem descartar o dataset (`comps validate`).
+- **Auto-Healing com `AdaptiveSelector`**: Quando classes CSS mudam dinamicamente (comum em SPAs com Tailwind ou CSS-in-JS), o motor adaptativo localiza os elementos por similaridade estrutural e semântica (`data-*`, `aria-*`, tags e padrões textuais), reduzindo manutenções desnecessárias.
 
 ---
 
@@ -50,7 +52,7 @@ Através dos campos obrigatórios e, quando declarado, de um modelo tipado do **
 | Decisão | Motivação | Trade-off / Preço Pago |
 |---|---|---|
 | **Plugins por domínio** | Isola as inevitáveis quebras de HTML frequentes de cada site, limitando o raio de ação. | A complexidade horizontal cresce; cada novo domínio exige sua própria função de parsing registrada. |
-| **Política de transporte por plugin** | Permite que cada domínio escolha entre renderização e HTTP direto, mantendo precisão sem desperdiçar recursos. | O contrato do plugin precisa declarar corretamente a necessidade de JavaScript. |
+| **Política de transporte por plugin** | Permite que cada domínio escolha entre renderização, HTTP direto ou modo stealth, mantendo precisão sem desperdiçar recursos. | O contrato do plugin precisa declarar corretamente a necessidade de JavaScript ou stealth. |
 | **Preservar registros com falhas** | Um erro em um nó não invalida um lote demorado. Mantém o pipeline de dados limpo para posterior reprocessamento/auditoria. | O dataset final pode incluir valores nulos em colunas essenciais se ignorados, forçando o uso de `comps validate`. |
 | **Jobs, cache e manifesto opcionais** | Coletas longas podem ser retomadas e comparadas sem tornar obrigatória uma infraestrutura externa. | O usuário precisa escolher um `--job-dir` quando quiser persistência entre execuções. |
 | **Fixtures HTML sintéticas para os testes** | Os testes rodam 100% offline, de forma rápida, previsível, e livre de problemas de rede. | Testes não falharão se o site real for redesenhado; os mocks exigem testes rotineiros complementares no "mundo real". |
@@ -63,11 +65,11 @@ Através dos campos obrigatórios e, quando declarado, de um modelo tipado do **
 | :--- | :--- | :--- |
 | **Linguagem & Contratos** | Python 3.11+ / Pydantic v2 | Base com *Type Hints* rígidos e validação no tempo de execução. |
 | **CLI & UX** | Typer + Rich | CLI imersiva e tipada; terminal colorido com diagnóstico de pipeline. |
-| **Rede & Scrape** | Playwright / HTTPX / Tenacity | Política por plugin, retry com backoff, limites por domínio e `robots.txt`. |
-| **Parsing** | BeautifulSoup 4 / Lógica Híbrida | Extração por JSON-LD, metatags, variáveis `__NEXT_DATA__` e CSS. |
-| **Data Engineering** | Pandas + PyArrow | Escrita tabular eficiente (Parquet, SQLite, CSV, JSON Lines). |
+| **Rede & Scrape** | Playwright / HTTPX / Tenacity | Política por plugin, modos stealth, retry com backoff, limites por domínio e `robots.txt`. |
+| **Parsing & Auto-Healing** | BS4 + `AdaptiveSelector` | Extração estruturada (JSON-LD, Next.js) e seleção resiliente por fingerprint. |
+| **Data Engineering & IA** | Pandas + PyArrow | Escrita eficiente (Parquet, SQLite, CSV, JSON Lines e Markdown para RAG/LLMs). |
 | **Estado & Extensão** | SQLite / entry points / JSON | Retomada opcional, plugins externos e manifesto auditável por execução. |
-| **Qualidade & CI** | Pytest / Ruff / Github Actions | Uma extensa e veloz suíte de testes (offline) validando contratos continuamente. |
+| **Qualidade & CI** | Pytest / Ruff / Github Actions | Extensa suíte de testes unitários, de integração e stress rodando offline. |
 
 ---
 
@@ -78,15 +80,15 @@ flowchart TD
     A[Usuário: comps scrape URL] --> B[Deduplicação e Job opcional]
     B --> C[Política robots.txt e limite por domínio]
     C --> D[Downloader conforme política do plugin]
-    D -->|browser_first ou browser_only| E[Playwright]
-    D -->|httpx_first ou httpx_only| F[HTTPX]
+    D -->|browser_first / stealth_browser| E[Playwright / Stealth]
+    D -->|httpx_first / stealth_http| F[HTTPX / TLS Impersonation]
     E --> G{HTML válido?}
     F --> G
     G --> H[Registry / Despachante]
     H -->|Identifica Domínio| I[Plugin Específico]
-    I -->|Extrai Dados| J[ScrapedRecord / Pydantic]
+    I -->|AdaptiveSelector / JSON-LD| J[ScrapedRecord / Pydantic]
     J --> K[Auditoria Falhas vs Qualidade]
-    K --> L[Gravação: Parquet / SQLite / JSON]
+    K --> L[Gravação: Parquet / SQLite / JSON / Markdown]
     K --> M[Manifesto *.run.json]
 ```
 

@@ -14,8 +14,12 @@ Formato baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 - `DownloadResult.size_bytes` e os logs de download agora medem o tamanho UTF-8 real, em vez da quantidade de caracteres.
 
 ### Adicionado
+- **Motor de Parsing Adaptativo / Auto-Healing**: módulo `compsognathus.core.adaptive` com `AdaptiveSelector`, fingerprinting de nós HTML e cálculo de similaridade semântica para evitar quebras por classes CSS dinâmicas.
+- **Transporte Stealth & Evasão Anti-Bot**: estratégias `stealth_browser` e `stealth_http` no `DownloadPolicy`, com evasão de `navigator.webdriver`, emulação de hardware/plugins no Playwright e suporte a TLS impersonation (`curl_cffi` / headers realistas).
+- **Exportação para IA & Markdown (RAG-Ready)**: suporte ao formato `--format markdown` / `.md` no pipeline de exportação e na CLI.
+- **Suíte de Testes de Stress e Resiliência**: testes automatizados de alta concorrência (20+ threads), contenção de domínios, parsing em DOMs de 500KB+ e exportação de 10.000+ registros.
 - Plugins podem declarar modelos Pydantic opcionais para validar e normalizar campos extraídos.
-- Políticas de download por domínio (`httpx_first`, `browser_first`, `httpx_only` e `browser_only`), com timeout, espera e cabeçalhos configuráveis.
+- Políticas de download por domínio (`httpx_first`, `browser_first`, `httpx_only`, `browser_only`, `stealth_browser` e `stealth_http`), com timeout, espera e cabeçalhos configuráveis.
 - Reutilização de clientes HTTP e sessões do navegador durante lotes concorrentes.
 - Metadados de download com status HTTP, URL final, duração, tentativas e tipo de erro.
 - `--job-dir` e `--resume` para persistir e retomar coletas com SQLite.

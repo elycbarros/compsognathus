@@ -105,6 +105,32 @@ def _parse_html_file(filepath: Path, url: str) -> ScrapedRecord:
         )
 
 
+def _dataframe_to_markdown(df: pd.DataFrame) -> str:
+    """Converte um DataFrame exportado em Markdown estruturado para LLMs / RAG."""
+    lines = ["# Compsognathus Dataset Export\n"]
+    for idx, row in df.iterrows():
+        url = str(row.get("url", f"Item {idx+1}"))
+        site = str(row.get("site", "N/A"))
+        title = row.get("title") or row.get("name") or url
+        lines.append(f"## {title}\n")
+        lines.append(f"- **URL**: {url}")
+        lines.append(f"- **Site**: {site}")
+        if "extracted_at" in row and pd.notna(row["extracted_at"]):
+            lines.append(f"- **Extracted At**: {row['extracted_at']}")
+        if "parse_ok" in row and pd.notna(row["parse_ok"]):
+            lines.append(f"- **Status**: {'OK' if row['parse_ok'] else 'Falha'}")
+
+        lines.append("\n### Dados Extraídos\n")
+        skip_cols = {"url", "site", "title", "name", "extracted_at", "parse_ok", "parse_errors"}
+        for col in df.columns:
+            if col not in skip_cols:
+                val = row[col]
+                if pd.notna(val):
+                    lines.append(f"- **{col}**: {val}")
+        lines.append("\n---\n")
+    return "\n".join(lines)
+
+
 def export_dataframe(df: pd.DataFrame, output_path: Path, fmt: str) -> None:
     """Exporta o DataFrame para o formato especificado.
 
@@ -114,11 +140,12 @@ def export_dataframe(df: pd.DataFrame, output_path: Path, fmt: str) -> None:
         - "json"
         - "jsonl"
         - "sqlite" / "db"
+        - "markdown" / "md"
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
     fmt_lower = fmt.lower().strip()
-    if fmt_lower not in {"parquet", "csv", "json", "jsonl", "ndjson", "sqlite", "db"}:
-        raise ValueError(f"Formato de exportação não suportado: '{fmt}'. Use: parquet, csv, json, jsonl, sqlite.")
+    if fmt_lower not in {"parquet", "csv", "json", "jsonl", "ndjson", "sqlite", "db", "markdown", "md"}:
+        raise ValueError(f"Formato de exportação não suportado: '{fmt}'. Use: parquet, csv, json, jsonl, sqlite, markdown.")
 
     # Mantém a extensão final para que pandas escolha o engine correto e só
     # substitui o destino depois que a escrita completa.
@@ -135,6 +162,9 @@ def export_dataframe(df: pd.DataFrame, output_path: Path, fmt: str) -> None:
         elif fmt_lower in ("sqlite", "db"):
             with closing(sqlite3.connect(temporary)) as conn:
                 df.to_sql("scraped_data", conn, if_exists="replace", index=False)
+        elif fmt_lower in ("markdown", "md"):
+            md_content = _dataframe_to_markdown(df)
+            temporary.write_text(md_content, encoding="utf-8")
         temporary.replace(output_path)
     finally:
         if temporary.exists():

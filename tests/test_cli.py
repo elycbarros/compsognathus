@@ -93,6 +93,20 @@ def test_cli_infere_formato_pela_extensao(tmp_path, monkeypatch):
     assert result.exit_code == 0
     assert seen["fmt"] == "csv"
 
+    # Testa inferência para markdown (.md)
+    result_md = runner.invoke(
+        app,
+        [
+            "scrape",
+            "https://books.toscrape.com/catalogue/item",
+            "--output",
+            str(tmp_path / "dados.md"),
+        ],
+    )
+    assert result_md.exit_code == 0
+    assert seen["fmt"] == "markdown"
+
+
 
 def test_cli_validate_dataset_com_falhas(tmp_path):
     import pandas as pd

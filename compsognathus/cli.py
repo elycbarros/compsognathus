@@ -93,8 +93,8 @@ def _read_urls(source: str) -> list[str]:
 @app.command()
 def scrape(
     source: str = typer.Argument(..., help="Arquivo .txt com URLs ou uma URL direta."),
-    output: Path = typer.Option(Path("output.parquet"), "--output", "-o", help="Arquivo de saída (parquet, csv, json, jsonl, sqlite)."),
-    fmt: str = typer.Option("parquet", "--format", "-f", help="Formato: 'parquet', 'csv', 'json', 'jsonl', 'sqlite'."),
+    output: Path = typer.Option(Path("output.parquet"), "--output", "-o", help="Arquivo de saída (parquet, csv, json, jsonl, sqlite, markdown)."),
+    fmt: str = typer.Option("parquet", "--format", "-f", help="Formato: 'parquet', 'csv', 'json', 'jsonl', 'sqlite', 'markdown'."),
     concurrency: int = typer.Option(1, "--concurrency", "-c", min=1, help="Número de downloads simultâneos em paralelo."),
     domain_concurrency: int = typer.Option(1, "--domain-concurrency", min=1, help="Máximo de downloads simultâneos por domínio."),
     domain_delay: float = typer.Option(1.0, "--domain-delay", min=0.0, help="Intervalo mínimo entre requisições do mesmo domínio."),
@@ -111,6 +111,7 @@ def scrape(
     Exemplos:
         comps scrape links.txt --output dados.parquet
         comps scrape links.txt --format jsonl --output dados.jsonl
+        comps scrape links.txt --format markdown --output dados.md
         comps scrape links.txt --format sqlite --output banco.db --concurrency 3
         comps scrape links.txt --job-dir .jobs/coleta --resume
         comps scrape links.txt --dry-run
@@ -142,6 +143,8 @@ def scrape(
         ".db": "sqlite",
         ".sqlite": "sqlite",
         ".sqlite3": "sqlite",
+        ".md": "markdown",
+        ".markdown": "markdown",
     }
     suffix_format = known_suffixes.get(output.suffix.lower())
     if fmt.lower() == "parquet" and suffix_format and suffix_format != "parquet":

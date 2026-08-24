@@ -61,8 +61,8 @@ comps --help
 ## 4. O Comportamento do Downloader
 
 Antes de raspar algo, é crucial entender como a ferramenta trata o acesso ao site para prever eventuais percalços:
-1. **Política do plugin**: O domínio escolhe `browser_first`, `browser_only`, `httpx_first` ou `httpx_only`. Isso evita impor Chromium a páginas estáticas, sem retirar suporte a SPAs.
-2. **Resiliência comum**: HTTPX e Playwright usam timeout, retry, validação de HTML e registro de status, duração e método escolhido.
+1. **Política do plugin**: O domínio escolhe `browser_first`, `browser_only`, `httpx_first`, `httpx_only`, `stealth_browser` ou `stealth_http`. Isso evita impor Chromium a páginas estáticas e ativa camuflagem profunda anti-automação nos domínios que exigem.
+2. **Resiliência e Evasão Stealth**: HTTPX e Playwright contam com timeout, retry com backoff exponencial, injeção de scripts anti-automação (evasão de `navigator.webdriver`, plugins e languages simulados) e validação contra páginas de bloqueio (WAF).
 3. **Controle responsável**: A CLI respeita `robots.txt` por padrão, limita concorrência e atraso por domínio e considera `Retry-After` quando o servidor sinaliza espera.
 
 ---
@@ -92,12 +92,16 @@ comps scrape alvos.txt --dry-run
 Se tudo estiver ok, o output alertará quais URLs têm plugins validados para elas, sem baixar 1 Byte da web.
 
 ### D. Raspar o Dataset
-Agora é pra valer. Vamos pedir ao framework que converta o HTML puro em um arquivo de dados tabulares (ex: `.csv`). 
+Agora é pra valer. Vamos pedir ao framework que converta o HTML puro em um arquivo de dados tabulares ou focado em IA:
 
 ```bash
+# Exportação clássica tabular (CSV, Parquet, SQLite)
 comps scrape alvos.txt --format csv --output livros.csv
+
+# Exportação para IA / RAG (Markdown estruturado com metadados)
+comps scrape alvos.txt --format markdown --output livros.md
 ```
-O console mostrará cada passo do download, e ao fim, os arquivos `livros.csv` e `livros.run.json` serão criados. O dataset terá as colunas (ex: Título, Preço, Disponibilidade, etc) definidas pelo criador do plugin, além dos metadados de auditoria.
+O console mostrará cada passo do download, e ao fim, os arquivos `livros.csv` (ou `.md`) e `livros.run.json` serão criados. O dataset terá as colunas (ex: Título, Preço, Disponibilidade, etc) definidas pelo criador do plugin, além dos metadados de auditoria.
 
 Para coletas longas, use um diretório de job. O SQLite guarda o progresso e os HTMLs podem ser reaproveitados:
 

@@ -140,3 +140,29 @@ def test_scrape_retorna_registro_salvo_ao_retomar_job(tmp_path, monkeypatch):
     assert bool(first.iloc[0]["parse_ok"])
     assert bool(second.iloc[0]["parse_ok"])
     assert calls == [[url], []]
+
+
+def test_scrape_exporta_markdown(tmp_path, monkeypatch):
+    fixture = Path(__file__).parent / "fixtures" / "books_toscrape_sample.html"
+    downloaded = tmp_path / "book.html"
+    downloaded.write_text(fixture.read_text(encoding="utf-8"), encoding="utf-8")
+    url = "https://books.toscrape.com/catalogue/book/item.html"
+
+    monkeypatch.setattr(
+        "compsognathus.scraper.download_all",
+        lambda urls, output_dir, concurrency, progress_callback: [
+            DownloadResult(url=url, filepath=downloaded, method="httpx", ok=True)
+        ],
+    )
+
+    out_md = tmp_path / "resultado.md"
+    df = scrape([url], out_md, fmt="markdown")
+
+    assert len(df) == 1
+    assert out_md.exists()
+    content = out_md.read_text(encoding="utf-8")
+    assert "# Compsognathus Dataset Export" in content
+    assert url in content
+    assert "books.toscrape.com" in content
+    assert "A Light in the Attic" in content
+

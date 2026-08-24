@@ -13,15 +13,15 @@ Ele deixa o trabalho repetitivo — tratar erros de rede, gerenciar retentativas
 ## Capacidades Principais
 
 - **Despacho dinâmico**: Plugins registrados por domínio, invocados automaticamente pela URL de origem.
-- **Download resiliente e configurável**: Cada plugin pode escolher entre HTTPX e Playwright, definir timeouts e cabeçalhos, e reutilizar recursos durante o lote. Inclui *exponential backoff* nativo contra limites de requisições.
-- **Extração limpa**: Foco em JSON-LD, payloads estruturados (como Next.js) e por último seletores CSS.
+- **Download resiliente e stealth**: Cada plugin pode escolher entre HTTPX e Playwright, estratégias comuns ou camufladas (`stealth_browser`, `stealth_http`), definir timeouts e cabeçalhos, e reutilizar recursos durante o lote. Inclui *exponential backoff* nativo contra limites de requisições.
+- **Extração inteligente e adaptativa**: Foco em JSON-LD, payloads estruturados (como Next.js) e seletores auto-healing com `AdaptiveSelector` para resistir a alterações em classes CSS dinâmicas.
 - **Validação de esquema**: O contrato de extração é checado por campos obrigatórios e, quando declarado pelo plugin, por um modelo tipado do Pydantic v2.
 - **Trilha de auditoria**: Falhas de download ou extração não descartam o dataset, mas são preservadas para diagnóstico (`comps validate`).
 - **Execuções recuperáveis**: `--job-dir` persiste o progresso, permite `--resume`, reutiliza HTMLs e registra recusas por `robots.txt`.
 - **Controle responsável**: Concorrência e atraso podem ser limitados por domínio, com ajuste após erros e suporte a `Retry-After`.
 - **Ecossistema extensível**: Plugins externos podem ser instalados como pacotes Python via entry points.
 - **Manifesto de execução**: Cada coleta gera um `*.run.json` com configuração, métricas, plugins e erros resumidos.
-- **Múltiplos Formatos**: Exportação embarcada para Parquet (padrão), CSV, JSON, JSONL e banco SQLite.
+- **Múltiplos Formatos (Analytics & IA)**: Exportação embarcada para Parquet (padrão), CSV, JSON, JSONL, banco SQLite e Markdown estruturado (focado em LLMs e RAG).
 
 ## Validação e Testes
 

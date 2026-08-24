@@ -30,22 +30,22 @@ Antes de programar o parser, use seu navegador para acessar a URL. Vá ao **Insp
 
 1. **JSON-LD (Schema.org):** Procure pela tag `<script type="application/ld+json">`. Se existir e contiver o dado, use isso. É o método mais imune a quebras cosméticas.
 2. **Payloads Embutidos de SPAs (Next.js/Nuxt):** Procure pelas strings `__NEXT_DATA__` ou `self.__next_f.push`. Os dados estarão em JSON formatado dentro do HTML.
-3. **Atributos de Teste (`data-testid`):** Muitas aplicações possuem âncoras para QAs (ex: `data-testid="product-price"`). São resistentes a mudanças de cor e tipografia.
-4. **Seletores CSS Genéricos:** O pior cenário, procure Classes CSS de hierarquia que referenciam o dado (ex: `<div class="price-box">`). Jamais selecione classes ofuscadas/criptográficas geradas por build como `.sc-bdfxgF.kiHWNp`, elas mudam na próxima compilação do site alvo.
-
-> **Regra de Ouro:** Não descreva um plugin como “resistente a qualquer mudança de site”. Todo scraper que depende da árvore DOM exige manutenção reativa à evolução da UI/UX daquele site.
+3. **Atributos de Teste (`data-testid` / `data-qa` / `aria-label`):** Muitas aplicações possuem âncoras semânticas resistentes a mudanças de estilo.
+4. **Seletores Auto-Healing (`AdaptiveSelector`):** Para elementos HTML dinâmicos sujeitos a mudanças de classes CSS (como Tailwind ou styled-components), use `AdaptiveSelector.find_one(...)` ou `AdaptiveSelector.extract_text(...)`. Ele calcula similaridade de nós e recupera o elemento mesmo com classes alteradas.
+5. **Seletores CSS Genéricos:** Procure classes estáveis de hierarquia que referenciam o dado (ex: `<div class="price-box">`).
 
 ---
 
 ## 3. O Contrato de Extração
 
-No arquivo `.py` do seu plugin (`compsognathus/plugins/meusite_com_br.py`), você verá uma estrutura similar a esta:
+No arquivo `.py` do seu plugin (`compsognathus/plugins/meusite_com_br.py`), você pode utilizar o `AdaptiveSelector` para uma extração resiliente:
 
 ```python
 """
 Plugin: Nome do Site (meusite.com.br)
 """
 from bs4 import BeautifulSoup
+from compsognathus.core.adaptive import AdaptiveSelector
 from compsognathus.core.record import ScrapedRecord
 from compsognathus.core.registry import register
 
@@ -54,15 +54,28 @@ def parse(html: str, url: str) -> ScrapedRecord:
     soup = BeautifulSoup(html, "html.parser")
     errors = []
 
-    h1 = soup.find("h1")
-    titulo = h1.get_text(strip=True) if h1 else None
+    # Extração resiliente com AdaptiveSelector
+    titulo = AdaptiveSelector.extract_text(
+        soup,
+        ["h1.product-title", "h1", "div.title"],
+        default="",
+    )
     if not titulo:
         errors.append("titulo")
+
+    preco = AdaptiveSelector.extract_text(
+        soup,
+        ["span.price-box", "span.price"],
+        text_pattern="R$",
+        default="",
+    )
+    if not preco:
+        errors.append("preco")
 
     return ScrapedRecord(
         url=url,
         site="meusite",
-        fields={"titulo": titulo, "preco": None},
+        fields={"titulo": titulo or None, "preco": preco or None},
         parse_ok=len(errors) == 0,
         parse_errors=errors,
     )
@@ -90,16 +103,18 @@ class Produto(BaseModel):
     "meusite.com.br",
     schema=["titulo", "preco"],
     model=Produto,
-    download_policy=DownloadPolicy(preferred="httpx_first"),
+    download_policy=DownloadPolicy(preferred="stealth_browser", timeout_seconds=20.0),
 )
 def parse(html: str, url: str) -> ScrapedRecord:
     ...
 ```
 
-Use `browser_first` para páginas que dependem de JavaScript, `httpx_first`
-para HTML estático e as variantes `*_only` quando o fallback não fizer
-sentido. A política também aceita `timeout_seconds`, `wait_after_load_ms` e
-`headers`.
+Estratégias de download disponíveis:
+- `browser_first`: Tenta Chromium headless via Playwright, fallback para HTTPX.
+- `httpx_first`: Tenta HTTPX direto primeiro; ideal para sites estáticos rápidos.
+- `stealth_browser`: Ativa evasão profunda de anti-bot no navegador (para portais protegidos por Cloudflare/Kasada).
+- `stealth_http`: Requisições HTTP com camuflagem de TLS e headers de navegador modernos.
+- `browser_only` / `httpx_only`: Restringe estritamente a um único transporte.
 
 ## 4. Plugin externo instalável
 
